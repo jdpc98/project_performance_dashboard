@@ -316,6 +316,7 @@ def load_timesheet_folder(folder_path):
     """
     Loads CSV files matching 'timesheet_report_*.csv' and merges them.
     Also renames 'service item' -> 'Service Item' if present.
+    Returns the merged dataframe and the most recent date from filenames.
     """
     pattern = os.path.join(folder_path, "timesheet_report_*.csv")
     csv_files = glob.glob(pattern)
@@ -325,6 +326,7 @@ def load_timesheet_folder(folder_path):
 
     df_list = []
     last_end_date = None
+    most_recent_date=None
     for file_path in csv_files:
         filename = os.path.basename(file_path)
         match = re.search(r'thru_(\d{4}-\d{2}-\d{2})\.csv$', filename)
@@ -332,6 +334,9 @@ def load_timesheet_folder(folder_path):
             end_date_str = match.group(1)
             try:
                 end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+                # Update most_recent_date if this date is more recent
+                if most_recent_date is None or end_date > most_recent_date:
+                    most_recent_date = end_date
             except ValueError:
                 end_date = None
         else:
@@ -345,10 +350,24 @@ def load_timesheet_folder(folder_path):
 
         df_temp["report_end_date"] = end_date
         df_list.append(df_temp)
-        last_end_date = end_date
+        #last_end_date = end_date
 
     df_merged = pd.concat(df_list, ignore_index=True)
-    return df_merged, last_end_date
+    
+    #convert recent date to string format for display
+    last_data_update = most_recent_date.strftime('%Y-%m-%d') if most_recent_date else "Unknown"
+    print_green(f"Most recent timesheet data date: {last_data_update}")
+    
+    # Save the most recent data update date to a file
+    if most_recent_date:
+        try:
+            with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "w") as f:
+                f.write(last_data_update)
+            print_green(f"Saved last data update date ({last_data_update}) to file")
+        except Exception as e:
+            print_red(f"Error saving last data update date: {str(e)}")
+    
+    return df_merged, most_recent_date
 
 
 def truncate_at_total(df):
@@ -397,7 +416,11 @@ def main():
 
     # 4) Load timesheet CSV
     timesheet_folder = r"C:\Users\jose.pineda\Desktop\smart_decon\operations\tsheets"
-    df_new, update_date = load_timesheet_folder(timesheet_folder)
+    df_new, most_recent_date = load_timesheet_folder(timesheet_folder)
+
+
+    #last_data_update=most_recent_date.strftime("%Y-%m-%d") if most_recent_date else 'Unidentified, please verify.'
+
 
     print_green("DEBUG: columns in df_new -> " + str(df_new.columns.tolist()))
     # Check if DataFrame is empty or missing required columns
@@ -569,9 +592,11 @@ def main():
     # print_cyan("DEBUG: 1871 sample ->\n"+str(debug_1871[['Employee','hours','day_cost','local_date']].head(20)))
 
     # Return for pickling
+    # Return for pickling - add the most_recent_date 
     last_update = pd.to_datetime('today').strftime('%Y-%m-%d')
+    last_data_update = most_recent_date.strftime('%Y-%m-%d') if most_recent_date else "Unknown"
     print_orange(">>> Finished main() and returning data now.")
-    return merged_df, df_projects, global_invoices, raw_invoices, last_update
+    return merged_df, df_projects, global_invoices, raw_invoices, last_update, last_data_update
 
 
 last_update = pd.to_datetime('today').strftime('%Y-%m-%d')
@@ -609,7 +634,7 @@ def precompute_and_save():
     Runs the main data processing pipeline and saves the resulting DataFrames
     as pickle files for faster future loading and also exports to Excel for debugging.
     """
-    global_merged_df, global_projects_df, global_invoices, global_raw_invoices, last_update = main()
+    global_merged_df, global_projects_df, global_invoices, global_raw_invoices, last_update, last_data_update = main()
 
     if global_merged_df is None:
         print_red("ERROR: Merged DF is None; cannot save pickles.")
@@ -626,7 +651,9 @@ def precompute_and_save():
 
     with open(os.path.join(PICKLE_OUTPUT_DIR, "last_update.txt"), "w") as f:
         f.write(last_update)
-
+    # Save the last data update date to a separate file
+    with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "w") as f:
+        f.write(last_data_update)
     print_green("Precomputed pickle files saved successfully.")
     
     # Export to Excel for debugging
@@ -710,6 +737,23 @@ def get_project_log_data(year=2025):
 
 # Exporting the function for external use
 __all__ = ['get_project_log_data']
+
+
+def last_update():
+    """Read the last data update date from file"""
+    try:
+        with open(os.path.join(PICKLE_OUTPUT_DIR, "last_update.txt"), "r") as f:
+            return f.read().strip()
+    except Exception:
+        return pd.to_datetime('today').strftime('%Y-%m-%d')
+
+def last_data_update():
+    """Read the last data update date from file"""
+    try:
+        with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "r") as f:
+            return f.read().strip()
+    except Exception:
+        return "Unknown"
 
 
 if __name__ == "__main__":

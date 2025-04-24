@@ -11,7 +11,7 @@ from dash import dcc
 # Import our separate modules
 import data_processing
 import config
-from data_processing import extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update #, data_update_date
+from data_processing import extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
 import base64
 import plotly.io as pio
@@ -28,6 +28,17 @@ global_invoices = pd.read_pickle(os.path.join(PICKLE_OUTPUT_DIR, "global_invoice
 global_raw_invoices = pd.read_pickle(os.path.join(PICKLE_OUTPUT_DIR, "global_raw_invoices.pkl"))
 #################################################################################################################
 #func for 1928 extra filter [jobcode 3 inclusion on project no]
+
+# Import last update date for display on dash
+with open(os.path.join(PICKLE_OUTPUT_DIR, "last_update.txt"), "r") as f:
+    last_update = f.read().strip()
+
+# Import last data update date for display on dash
+try:
+    with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "r") as f:
+        last_data_update = f.read().strip()
+except FileNotFoundError:
+    last_data_update = "Unknown"
 
 """
 def get_week_in_month(date_obj):
@@ -341,7 +352,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
             ),
             #show last run date
             html.Div(
-            f"Latest Data Update: {"..."}",
+            f"Latest Data Update: {last_data_update}",
             style={'color': 'gray', 'font-size': '12px', 'text-align': 'center', 'margin-top': '20px'}
             ),
             html.Div([
@@ -429,7 +440,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
    
             #show last update date
             html.Div(
-            f"Latest Data Update: {""}",
+            f"Latest Data Update: {last_data_update}",
             style={'color': 'gray', 'font-size': '12px', 'text-align': 'center', 'margin-top': '20px'}
             ),
             html.Div([
@@ -465,7 +476,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
             # All projects table
             html.Div([
                 html.H2(id='report-table-title', style={'textAlign': 'center'}),
-                html.H3("All Active Projects", style={'textAlign': 'center'}),
+                html.H3("Monthly Invoice Report", style={'textAlign': 'center'}),
                 dash_table.DataTable(
                     id='weekly-report-table',
                     columns=[],
@@ -497,7 +508,11 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
             html.Div([
                 html.Button("Export to PDF", id="export-weekly-report", n_clicks=0),
                 dcc.Download(id="download-weekly-report-pdf")
-            ], style={'textAlign': 'center', 'marginTop': '20px', 'marginBottom': '40px'})
+            ], style={'textAlign': 'center', 'marginTop': '20px', 'marginBottom': '40px'}),
+            html.Div(
+            f"Latest Data Update: {last_data_update}",
+            style={'color': 'gray', 'font-size': '12px', 'text-align': 'center', 'margin-top': '10px', 'marginBottom': '40px'}
+        )
         ])
     ]),
     # ----------------------------------------------------------------
@@ -1688,6 +1703,13 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
     month_name = date_obj.strftime('%B')
     year = date_obj.year
     
+    # Get the last data update date
+    try:
+        with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "r") as f:
+            last_data_update = f.read().strip()
+    except:
+        last_data_update = "Unknown"
+    
     # Convert table data to DataFrames
     df_all = pd.DataFrame(table_data) if table_data else pd.DataFrame()
     
@@ -1736,6 +1758,9 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
         </style>
       </head>
       <body>
+        <div class="logo-container">
+          <img src="data:image/png;base64,{config.encoded_logo}" style="height: 70px;">
+        </div>
         <h1>Monthly Project Report</h1>
         <h2>{month_name} {year}</h2>
         
@@ -1822,7 +1847,9 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
     else:
         html_string += "<p>No project data available</p>"
     
-    html_string += """
+    html_string += f"""
+        <div class="footer">Latest Data Update: {last_data_update}</div>
+      </body>
       </body>
     </html>
     """
