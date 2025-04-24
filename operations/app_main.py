@@ -1704,7 +1704,23 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
     date_obj = pd.to_datetime(selected_date)
     month_name = date_obj.strftime('%B')
     year = date_obj.year
+    # Better week calculation that handles Mondays correctly
+    # Get the first day of the month
+    first_day = date_obj.replace(day=1)
     
+    # Find the week number using isocalendar
+    # This returns a tuple (year, week_number, weekday)
+    first_day_week = first_day.isocalendar()[1]
+    current_week = date_obj.isocalendar()[1]
+    
+    # Calculate week of month (1-based)
+    # If the first day of the month and the selected date are in different ISO weeks
+    week_of_month = current_week - first_day_week + 1
+    
+    # Handle edge case where week spans across months/years
+    if week_of_month <= 0:
+        # We're in the same week as the end of the previous month
+        week_of_month = 1
     # Get the last data update date
     try:
         with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "r") as f:
@@ -1722,7 +1738,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
         <meta charset="utf-8">
         <style>
           @page {{
-            size: 500mm 300mm;
+            size: 400mm 300mm;
             margin-left: 0.3cm;    /* Smaller left margin */
             margin-right: 0.8cm;   /* Smaller right margin */
             margin-top: 1cm;
@@ -1763,8 +1779,8 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
         <div class="logo-container">
           <img src="data:image/png;base64,{config.encoded_logo}" style="height: 70px;">
         </div>
-        <h1>Monthly Project Report</h1>
-        <h2>{month_name} {year}</h2>
+        <h1>Monthly Invoice Report</h1>
+        <h2>{month_name} {year}- Week {week_of_month}</h2>
         
         <h3>...</h3>
     """
