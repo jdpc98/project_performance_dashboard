@@ -194,17 +194,33 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                         acummulative_value = None
             # Calculate Invoiced Percentage (total_invoice / contracted_amount)
             invoiced_percent = (total_invoice / contracted_amount * 100) if contracted_amount and total_invoice else None
-            
+            def extract_number_part(value):
+                """Extract just the number prefix from strings like '1-Something', '2-Other', etc."""
+                if not isinstance(value, str):
+                    return value
+                
+                # Look for patterns like "1-", "2.", "3:", etc.
+                import re
+                match = re.match(r'^(\d+)[-\.\s:]', value)
+                if match:
+                    return match.group(1)
+                return value
             # Build the project record for the table
             project_record = {
                 'Project No': project_no,
                 'Clients': project_row.get('Clients', 'Unknown'),
-                'Status': project_row.get('Status', 'Unknown'),
+                #'Status': project_row.get('Status', 'Unknown'),
+                'Status': extract_number_part(project_row.get('Status', 'Unknown')),
                 'PM': project_row.get('PM', 'Unknown'),
+                
                 'TL': project_row.get('TL', 'Unkown'),
-                'Service Line': project_row.get('Service Line', 'Unknown'),  
-                'Market Segment': project_row.get('Market Segment', 'Unknown'),  
-                'Type': project_row.get('Type', 'Unknown'),  
+                'Service Line': extract_number_part(project_row.get('Service Line', 'Unknown')),  
+                'Market Segment': extract_number_part(project_row.get('Market Segment', 'Unknown')),  
+                'Type': extract_number_part(project_row.get('Type', 'Unknown')),  
+                #'Service Line': project_row.get('Service Line', 'Unknown'),  
+                #'Market Segment': project_row.get('Market Segment', 'Unknown'),  
+                #'Type': project_row.get('Type', 'Unknown'),  
+                
                 'Contracted Amount': f"${contracted_amount:,.2f}" if contracted_amount else "N/A",
                 'Projected': f"${projected_value:,.2f}" if projected_value else "N/A",
                 'Actual': f"${actual_value:,.2f}" if actual_value else "N/A",

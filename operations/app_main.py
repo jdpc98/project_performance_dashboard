@@ -250,7 +250,8 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                         columns=[{'name': 'Field', 'id': 'Field'}, {'name': 'Value', 'id': 'Value'}],
                         data=[],
                         style_table=config.TABLE_STYLE,
-                        style_cell=config.TABLE_CELL_STYLE,
+                        #style_cell=config.TABLE_CELL_STYLE,
+                        style_cell={'textAlign': 'left', 'padding': '5px', 'fontFamily': 'Calibri, sans-serif'},
                         style_cell_conditional=config.TABLE_CELL_CONDITIONAL
                     )
                 ], style={'width': '40%', 'display': 'inline-block', 'verticalAlign': 'top', 'padding': '10px', 'margin': '10px'}),
@@ -412,7 +413,8 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                 columns=[{'name': 'Metric', 'id': 'Metric'}, {'name': 'Value', 'id': 'Value'}],
                 data=[],
                 style_table={'width': '40%', 'margin': 'auto', 'overflowY': 'auto'},
-                style_cell=TABLE_CELL_STYLE
+                #style_cell=TABLE_CELL_STYLE
+                style_cell={'textAlign': 'left', 'fontFamily': 'Calibri, sans-serif'}
             ),
             # Title for Detailed Projects Table
             html.H3("Project Summary", style={'textAlign': 'center', 'fontFamily': 'Calibri, sans-serif', 'margin-top': '20px'}),
@@ -423,7 +425,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                 columns=[],  # set via callback
                 data=[],     # set via callback
                 style_table={'width': '80%', 'margin': 'auto', 'overflowY': 'auto'},
-                style_cell={'textAlign': 'center', 'fontFamily': 'Calibri, sans-serif'},
+                style_cell={'textAlign': 'left', 'fontFamily': 'Calibri, sans-serif'},
                 style_data_conditional=config.RIGHT_TABLE_RED_STYLE
 
             ), # New: Date range picker for invoice dates
@@ -482,7 +484,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                     columns=[],
                     data=[],
                     style_table={'width': '95%', 'margin': 'auto', 'overflowX': 'auto'},
-                    style_cell={'textAlign': 'center', 'fontFamily': 'Calibri, sans-serif'},
+                    style_cell={'textAlign': 'left', 'fontFamily': 'Calibri, sans-serif'},
                     style_header={'backgroundColor': '#f8f9fa', 'fontWeight': 'bold'},
                     style_data_conditional=[
                         {
@@ -1740,7 +1742,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
           th, td {{
             border: 1px solid black;
             padding: 2px;
-            text-align: center;
+            text-align: left;
             word-wrap: break-word;
             overflow: hidden;
             max-width: 2cm;  /* Limit maximum width for any column */
@@ -1801,12 +1803,12 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                 remaining_width -= 7
                 allocated_columns += 1
             elif col_id == 'Clients':
-                col_widths[col_id] = 12  # Client names
-                remaining_width -= 12
+                col_widths[col_id] = 8  # Client names
+                remaining_width -= 8
                 allocated_columns += 1
             elif col_id == 'Status':
-                col_widths[col_id] = 10  # Status text
-                remaining_width -= 10
+                col_widths[col_id] = 3  # Status text
+                remaining_width -= 3
                 allocated_columns += 1
             elif col_id == 'PM':
                 col_widths[col_id] = 4  # Project manager initials
@@ -1817,16 +1819,16 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                 remaining_width -= 4
                 allocated_columns += 1
             elif col_id == 'Service Line':  # Add this
-                col_widths[col_id] = 8  # Service Line text
-                remaining_width -= 8
+                col_widths[col_id] = 3  # Service Line text
+                remaining_width -= 3
                 allocated_columns += 1
             elif col_id == 'Market Segment':  # Add this
-                col_widths[col_id] = 8  # Market Segment text
-                remaining_width -= 8
+                col_widths[col_id] = 3  # Market Segment text
+                remaining_width -= 3
                 allocated_columns += 1
             elif col_id == 'Type':  # Add this
-                col_widths[col_id] = 6  # Type text
-                remaining_width -= 6
+                col_widths[col_id] = 3  # Type text
+                remaining_width -= 3
                 allocated_columns += 1
             elif col_id in ['ER Contract', 'ER Invoiced']:
                 col_widths[col_id] = 4  # ER values
@@ -1847,7 +1849,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
         for col in columns:
             col_id = col['id']
             width = col_widths.get(col_id, 100/col_count)
-            html_string += f"<th style='width:{width:.1f}%'>{col['name']}</th>"
+            html_string += f"<th style='width:{width:.1f}%; text-align: left;'>{col['name']}</th>"
         html_string += "</tr></thead><tbody>"
         
         for row in table_data:
@@ -1855,13 +1857,23 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
             for col in columns:
                 col_id = col['id']
                 if col_id == 'ER Invoiced':
-                    html_string += format_er_cell(row)
+                    # For ER Invoiced, maintain the color formatting but add left alignment
+                    if row['ER Invoiced'] != 'N/A':
+                        try:
+                            er_val = float(str(row['ER Invoiced']).replace('$', '').replace(',', ''))
+                            if er_val < 1:
+                                html_string += f"<td class='er-low' style='text-align:left;'>{row['ER Invoiced']}</td>"
+                            elif er_val <= 2.5:
+                                html_string += f"<td class='er-mid' style='text-align:left;'>{row['ER Invoiced']}</td>"
+                            else:
+                                html_string += f"<td class='er-high' style='text-align:left;'>{row['ER Invoiced']}</td>"
+                        except:
+                            html_string += f"<td style='text-align:left;'>{row['ER Invoiced']}</td>"
+                    else:
+                        html_string += f"<td style='text-align:left;'>{row['ER Invoiced']}</td>"
                 else:
-                    html_string += f"<td>{row.get(col_id, '')}</td>"
+                    html_string += f"<td style='text-align:left;'>{row.get(col_id, '')}</td>"  # Add style='text-align:left;'
             html_string += "</tr>"
-        html_string += "</tbody></table>"
-    else:
-        html_string += "<p>No project data available</p>"
     
     html_string += f"""
         <div class="footer">Latest Data Update: {last_data_update}</div>
@@ -1927,6 +1939,61 @@ def generate_monthly_report(selected_date):
     # Filter columns to only show the ones we want
     display_columns = [col for col in all_columns if col['id'] in visible_columns]
     
+    for col in display_columns:
+        if col['id'] == 'Service Line':
+            col['name'] = 'SL'
+        elif col['id'] == 'Market Segment':
+            col['name'] = 'MS'
+    # Create a totals row
+    totals_row = {col: '' for col in visible_columns}  # Initialize with empty strings for all columns
+    totals_row['Project No'] = 'TOTAL:'
+    
+    # Helper function to extract numeric values from formatted strings
+    def extract_numeric(value):
+        if isinstance(value, str):
+            # Remove $, % and commas, then convert to float
+            cleaned = value.replace('$', '').replace(',', '').replace('%', '')
+            try:
+                return float(cleaned)
+            except:
+                return 0
+        return 0
+    
+    # Calculate totals for numeric columns
+    if report_data:
+        # Calculate sum for Projected column
+        if 'Projected' in visible_columns:
+            projected_sum = sum(extract_numeric(row.get('Projected', 0)) for row in report_data)
+            totals_row['Projected'] = f"${projected_sum:,.2f}" if projected_sum > 0 else "N/A"
+        
+        # Calculate sum for Actual column
+        if 'Actual' in visible_columns:
+            actual_sum = sum(extract_numeric(row.get('Actual', 0)) for row in report_data)
+            totals_row['Actual'] = f"${actual_sum:,.2f}" if actual_sum > 0 else "N/A"
+        
+        # Calculate average for Invoiced % column - only including non-N/A values
+        if 'Invoiced %' in visible_columns:
+            invoiced_pct_values = [extract_numeric(row.get('Invoiced %', 0)) for row in report_data 
+                                  if row.get('Invoiced %', 'N/A') != 'N/A']
+            if invoiced_pct_values:
+                avg_invoiced_pct = sum(invoiced_pct_values) / len(invoiced_pct_values)
+                totals_row['Invoiced %'] = f"{avg_invoiced_pct:.1f}%"
+            else:
+                totals_row['Invoiced %'] = "N/A"
+        
+        # Calculate average for ER Contract and ER Invoiced columns
+        for er_col in ['ER Contract', 'ER Invoiced']:
+            if er_col in visible_columns:
+                er_values = [extract_numeric(row.get(er_col, 0)) for row in report_data 
+                            if row.get(er_col, 'N/A') != 'N/A']
+                if er_values:
+                    avg_er = sum(er_values) / len(er_values)
+                    totals_row[er_col] = f"{avg_er:.2f}"
+                else:
+                    totals_row[er_col] = "N/A"
+    
+    # Append the totals row
+    report_data.append(totals_row)
     # The data still has all fields, but we're only showing selected columns
     return report_data, display_columns
 
