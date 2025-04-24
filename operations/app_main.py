@@ -1816,6 +1816,18 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                 col_widths[col_id] = 4  # Task Lead initials
                 remaining_width -= 4
                 allocated_columns += 1
+            elif col_id == 'Service Line':  # Add this
+                col_widths[col_id] = 8  # Service Line text
+                remaining_width -= 8
+                allocated_columns += 1
+            elif col_id == 'Market Segment':  # Add this
+                col_widths[col_id] = 8  # Market Segment text
+                remaining_width -= 8
+                allocated_columns += 1
+            elif col_id == 'Type':  # Add this
+                col_widths[col_id] = 6  # Type text
+                remaining_width -= 6
+                allocated_columns += 1
             elif col_id in ['ER Contract', 'ER Invoiced']:
                 col_widths[col_id] = 4  # ER values
                 remaining_width -= 4
@@ -1897,6 +1909,9 @@ def generate_monthly_report(selected_date):
         'Status', 
         'PM', 
         'TL',
+        'Service Line',     
+        'Market Segment',  
+        'Type', 
         #'Contracted Amount',
         'Projected',  
         'Actual',
