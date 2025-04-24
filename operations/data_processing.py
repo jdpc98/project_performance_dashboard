@@ -17,6 +17,244 @@ PICKLE_OUTPUT_DIR = r"C:\Users\jose.pineda\Desktop\smart_decon\operations\pickle
 # HELPER & UTILITY FUNCTIONS
 # ==============================
 
+
+def generate_monthly_report_data(selected_date, global_projects_df, global_merged_df, global_raw_invoices, project_log_path):
+    """
+    Generate monthly report data based on the selected date.
+    Returns report data and columns for displaying the monthly project report.
+    """
+    if not selected_date:
+        return [], []
+
+    # Get month and year from selected date
+    date_obj = pd.to_datetime(selected_date)
+    selected_month = date_obj.month
+    selected_year = date_obj.year
+
+    # Check if year is supported (2023, 2024, or 2025)
+    if selected_year not in [2023, 2024, 2025]:
+        print_red(f"Reports are only available for years 2023-2025. Selected year: {selected_year}")
+        return [], []
+
+    print_green(f"==================== GENERATING REPORT ====================")
+    print_green(f"Generating report for {date_obj.strftime('%B %Y')}")
+    print_green(f"Selected month: {selected_month}, year: {selected_year}")
+
+    # Load data from the correct sheet based on the selected year
+    sheet_name = f"5_Invoice-{selected_year}"
+
+    try:
+        # Read the selected sheet from the project log
+        df_sheet = pd.read_excel(project_log_path, sheet_name=sheet_name)
+        print_green(f"Successfully loaded sheet {sheet_name} from project log")
+        print_green(f"Sheet columns: {df_sheet.columns.tolist()}")
+
+        # Add a column to preserve the original order
+        df_sheet['Original_Order'] = range(len(df_sheet))
+
+        # Check if column A exists and contains month values
+        if 'Month' not in df_sheet.columns and df_sheet.columns[0] != 'Month':
+            # If column not named 'Month', rename the first column
+            first_col_name = df_sheet.columns[0]
+            df_sheet.rename(columns={first_col_name: 'Month'}, inplace=True)
+            print_green(f"Renamed first column from '{first_col_name}' to 'Month'")
+
+        # Filter rows where Month column matches the selected month
+        df_month = df_sheet[pd.to_numeric(df_sheet['Month'], errors='coerce') == selected_month]
+        print_green(f"Found {len(df_month)} projects for month {selected_month} in year {selected_year}")
+
+        # Validate the DataFrame before processing
+        if df_month.empty:
+            print_red(f"Error: No data found for month {selected_month} in sheet {sheet_name}")
+            return [], []
+
+        # Extract project numbers from the filtered sheet
+        project_column = 'Project No' if 'Project No' in df_month.columns else 'Project No.'
+        if project_column not in df_month.columns:
+            # Look for any column that might contain project numbers
+            for col in df_month.columns:
+                if 'project' in col.lower():
+                    project_column = col
+                    break
+
+        if project_column not in df_month.columns:
+            print_red(f"No project number column found in sheet {sheet_name}")
+            print_cyan(f"Available columns: {df_month.columns.tolist()}")
+            return [], []
+
+        # Get project numbers from the sheet
+        projects_in_month = df_month[project_column].dropna().unique().tolist()
+        projects_in_month = [standardize_project_no(str(p)) for p in projects_in_month if str(p).strip().upper() != 'TOTAL']
+
+        # Now build the report with these projects
+        active_project_details = []
+
+        for project_no in projects_in_month:
+            # Skip 'TOTAL' rows
+            if str(project_no).strip().upper() == 'TOTAL':
+                continue
+
+            # Find this project in the projects dataframe
+            project_df = global_projects_df[global_projects_df['Project No'].apply(
+                lambda x: standardize_project_no(str(x)) == project_no
+            )]
+
+            if project_df.empty:
+                print_red(f"Project {project_no} not found in projects database!")
+                continue
+
+            project_row = project_df.iloc[0]
+
+            # Get all invoices for this project (for ER calculation)
+            project_invoices = global_raw_invoices[global_raw_invoices['Project No'].apply(
+                lambda x: standardize_project_no(str(x)) == project_no
+            )]
+
+            if project_invoices.empty:
+                print_red(f"No invoices found for project {project_no}")
+                # Continue with default values for invoice-related fields
+                monthly_invoice = 0
+                total_invoice = 0
+            else:
+                # Convert 'Actual' column to numeric before summing
+                project_invoices['Actual'] = pd.to_numeric(project_invoices['Actual'], errors='coerce')
+
+                # Get monthly invoice amount from the sheet
+                monthly_invoice_col = 'Actual' if 'Actual' in df_month.columns else None
+                if monthly_invoice_col:
+                    monthly_invoice = df_month.loc[
+                        df_month[project_column].apply(lambda x: standardize_project_no(str(x)) == project_no),
+                        monthly_invoice_col
+                    ].sum()
+                else:
+                    monthly_invoice = 0
+
+                # Get total invoice amount (cumulative)
+                total_invoice = project_invoices['Actual'].sum()
+
+            # Get total cost from timesheet data
+            project_costs = global_merged_df[global_merged_df['Project No'] == project_no]
+            total_cost = project_costs['day_cost'].sum() if not project_costs.empty else 0
+
+            # Parse contracted amount
+            contracted_amount = project_row.get('Contracted Amount', None)
+            if isinstance(contracted_amount, str):
+                try:
+                    contracted_amount = float(contracted_amount.replace('$', '').replace(',', ''))
+                except:
+                    contracted_amount = None
+
+            # Calculate ER values
+            er_contract = contracted_amount / total_cost if total_cost > 0 and contracted_amount else None
+            er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice else None
+
+            # Get Projected, Actual, and Acummulative from the sheet for this project
+            project_month_data = df_month[df_month[project_column].apply(
+                lambda x: standardize_project_no(str(x)) == project_no
+            )]
+            
+            # Extract Projected, Actual, and Acummulative values
+            projected_value = None
+            actual_value = None
+            acummulative_value = None
+            
+            if not project_month_data.empty:
+                if 'Projected' in project_month_data.columns:
+                    projected_value = project_month_data['Projected'].iloc[0]
+                    if isinstance(projected_value, str):
+                        projected_value = projected_value.replace('$', '').replace(',', '')
+                    try:
+                        projected_value = float(projected_value) if pd.notnull(projected_value) else None
+                    except:
+                        projected_value = None
+                
+                if 'Actual' in project_month_data.columns:
+                    actual_value = project_month_data['Actual'].iloc[0]
+                    if isinstance(actual_value, str):
+                        actual_value = actual_value.replace('$', '').replace(',', '')
+                    try:
+                        actual_value = float(actual_value) if pd.notnull(actual_value) else None
+                    except:
+                        actual_value = None
+                
+                # Handle different spellings of "Acummulative"/"Accumulative"
+                acum_col = None
+                for col in project_month_data.columns:
+                    if 'acum' in col.lower() or 'accum' in col.lower():
+                        acum_col = col
+                        break
+                
+                if acum_col:
+                    acummulative_value = project_month_data[acum_col].iloc[0]
+                    if isinstance(acummulative_value, str):
+                        acummulative_value = acummulative_value.replace('$', '').replace(',', '')
+                    try:
+                        acummulative_value = float(acummulative_value) if pd.notnull(acummulative_value) else None
+                    except:
+                        acummulative_value = None
+            # Calculate Invoiced Percentage (total_invoice / contracted_amount)
+            invoiced_percent = (total_invoice / contracted_amount * 100) if contracted_amount and total_invoice else None
+            
+            # Build the project record for the table
+            project_record = {
+                'Project No': project_no,
+                'Clients': project_row.get('Clients', 'Unknown'),
+                'Status': project_row.get('Status', 'Unknown'),
+                'PM': project_row.get('PM', 'Unknown'),
+                'TL': project_row.get('TL', 'Unkown'),
+                'Contracted Amount': f"${contracted_amount:,.2f}" if contracted_amount else "N/A",
+                'Projected': f"${projected_value:,.2f}" if projected_value else "N/A",
+                'Actual': f"${actual_value:,.2f}" if actual_value else "N/A",
+                'Acummulative': f"${acummulative_value:,.2f}" if acummulative_value else "N/A",
+                'Monthly Invoice': f"${monthly_invoice:,.2f}" if monthly_invoice else "N/A",
+                'Total Invoice': f"${total_invoice:,.2f}" if total_invoice else "N/A",
+                'Total Cost': f"${total_cost:,.2f}" if total_cost else "N/A",
+                'Invoiced %': f"{invoiced_percent:.1f}%" if invoiced_percent is not None else "N/A",
+                'ER Contract': f"{er_contract:.2f}" if er_contract else "N/A",
+                'ER Invoiced': f"{er_invoiced:.2f}" if er_invoiced else "N/A"
+            }
+
+            # Add Original_Order for sorting if available
+            original_order_values = df_month.loc[
+                df_month[project_column].apply(lambda x: standardize_project_no(str(x)) == project_no), 
+                'Original_Order'
+            ]
+            if not original_order_values.empty:
+                project_record['Original_Order'] = original_order_values.values[0]
+            else:
+                project_record['Original_Order'] = 999  # Default high value for sorting
+
+            active_project_details.append(project_record)
+
+        # If no valid projects found, return empty data
+        if not active_project_details:
+            print_red(f"No valid projects found in month {selected_month} of year {selected_year}!")
+            return [], []
+
+        # Sort the projects by the original order
+        active_project_details = sorted(active_project_details, key=lambda x: x.get('Original_Order', 999))
+
+        # Create columns for the table
+        columns = [{'name': col, 'id': col} for col in active_project_details[0].keys() if col != 'Original_Order']
+
+        # Remove Original_Order from the final data
+        for record in active_project_details:
+            if 'Original_Order' in record:
+                del record['Original_Order']
+
+        print_green(f"Final report contains {len(active_project_details)} projects")
+        print_green(f"==================== END OF REPORT GENERATION ====================")
+
+        return active_project_details, columns
+
+    except Exception as e:
+        import traceback
+        print_red(f"Error loading project data: {str(e)}")
+        print_red(traceback.format_exc())
+        return [], []
+
+
+
 def extract_project_no(jobcode_str):
     """Return the first 7 characters from jobcode_str (Project No)."""
     return str(jobcode_str)[:7].strip()
@@ -683,56 +921,63 @@ with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
 project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
     
 
-def get_project_log_data(year=2025):
-    """Load and return the project log data from the correct invoice sheet based on year.
+def get_project_log_data(years=[2023, 2024, 2025]):
+    """Load and return the project log data from all invoice sheets for the specified years.
     
     Args:
-        year (int): The year for which to load data (2023, 2024, or 2025)
+        years (list): List of years for which to load data (default: [2023, 2024, 2025])
     
     Returns:
-        pandas.DataFrame: The loaded project data with Month column
+        pandas.DataFrame: The combined loaded project data with Month column and Year column
     """
-    try:
-        # Use the correct sheet name based on year
-        sheet_name = f"5_Invoice-{year}"
-        
-        print_green(f"Attempting to load project log from: {project_log_path}, sheet: {sheet_name}")
-        df_projects = pd.read_excel(project_log_path, sheet_name=sheet_name, engine='openpyxl')
-        print_green(f"Successfully loaded sheet {sheet_name} with {len(df_projects)} rows")
-        
-        # Check if 'Month' column exists
-        if 'Month' in df_projects.columns:
-            # Convert Month to numeric values
-            df_projects['Month'] = pd.to_numeric(df_projects['Month'], errors='coerce')
-            month_values = df_projects['Month'].value_counts().to_dict()
-            print_green(f"Month column found with values: {month_values}")
-        else:
-            print_red(f"Month column not found in {sheet_name}")
-            # Try to find a column that might contain month information
-            date_columns = [col for col in df_projects.columns if 'date' in str(col).lower()]
-            if date_columns and 'Invoice Date' in date_columns:
-                print_green(f"Deriving 'Month' column from 'Invoice Date'")
-                df_projects['Month'] = pd.to_datetime(df_projects['Invoice Date'], errors='coerce').dt.month
-            elif len(df_projects.columns) > 0:
-                # If no date column, check if first column might contain month info
-                first_col = df_projects.columns[0]
-                print_green(f"Checking if first column '{first_col}' contains month information")
-                if df_projects[first_col].dtype in ['int64', 'float64'] or pd.to_numeric(df_projects[first_col], errors='coerce').notna().any():
-                    df_projects['Month'] = pd.to_numeric(df_projects[first_col], errors='coerce')
-                    print_green(f"Derived 'Month' from column '{first_col}'")
-        
-        # Check if Project No column exists, standardize if it does
-        if 'Project No' in df_projects.columns:
-            df_projects["Project No"] = df_projects["Project No"].astype(str).str.strip().apply(standardize_project_no)
-        
-        print_green(f"Final dataframe has {len(df_projects)} rows with columns: {df_projects.columns.tolist()}")
-        return df_projects
-        
-    except Exception as e:
-        print_red(f"Error in get_project_log_data: {str(e)}")
+    combined_df = pd.DataFrame()
+    
+    for year in years:
+        try:
+            # Use the correct sheet name based on year
+            sheet_name = f"5_Invoice-{year}"
+            
+            print_green(f"Attempting to load project log from: {project_log_path}, sheet: {sheet_name}")
+            df_projects = pd.read_excel(project_log_path, sheet_name=sheet_name, engine='openpyxl')
+            print_green(f"Successfully loaded sheet {sheet_name} with {len(df_projects)} rows")
+            
+            # Add a Year column to identify the source
+            df_projects['Year'] = year
+            
+            # Check if 'Month' column exists
+            if 'Month' in df_projects.columns:
+                # Convert Month to numeric values
+                df_projects['Month'] = pd.to_numeric(df_projects['Month'], errors='coerce')
+            else:
+                print_red(f"Month column not found in {sheet_name}")
+                # Try to find a column that might contain month information
+                date_columns = [col for col in df_projects.columns if 'date' in str(col).lower()]
+                if date_columns and 'Invoice Date' in date_columns:
+                    print_green(f"Deriving 'Month' column from 'Invoice Date'")
+                    df_projects['Month'] = pd.to_datetime(df_projects['Invoice Date'], errors='coerce').dt.month
+                elif len(df_projects.columns) > 0:
+                    # If no date column, check if first column might contain month info
+                    first_col = df_projects.columns[0]
+                    if df_projects[first_col].dtype in ['int64', 'float64'] or pd.to_numeric(df_projects[first_col], errors='coerce').notna().any():
+                        df_projects['Month'] = pd.to_numeric(df_projects[first_col], errors='coerce')
+            
+            # Check if Project No column exists, standardize if it does
+            if 'Project No' in df_projects.columns:
+                df_projects["Project No"] = df_projects["Project No"].astype(str).str.strip().apply(standardize_project_no)
+            
+            # Add to the combined DataFrame
+            combined_df = pd.concat([combined_df, df_projects], ignore_index=True)
+            
+        except Exception as e:
+            print_red(f"Error loading data for year {year}: {str(e)}")
+    
+    if combined_df.empty:
+        print_red("No data could be loaded from any year sheet")
         # Return an empty DataFrame with required columns as fallback
-        empty_df = pd.DataFrame(columns=['Project No', 'Month', 'Actual', 'Invoice Date'])
-        return empty_df
+        return pd.DataFrame(columns=['Project No', 'Month', 'Actual', 'Invoice Date', 'Year'])
+    
+    print_green(f"Final combined dataframe has {len(combined_df)} rows")
+    return combined_df
 
 
 # Exporting the function for external use
