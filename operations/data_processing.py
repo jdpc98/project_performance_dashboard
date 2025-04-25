@@ -269,7 +269,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 #'Status': project_row.get('Status', 'Unknown'),
                 'Status': extract_number_part(project_row.get('Status', 'Unknown')),
                 'PM': project_row.get('PM', 'Unknown'),
-                
+                'Project Description': project_row.get('Project Description', 'No Description'),
                 'TL': project_row.get('TL', 'Unkown'),
                 'Service Line': extract_number_part(project_row.get('Service Line', 'Unknown')),  
                 'Market Segment': extract_number_part(project_row.get('Market Segment', 'Unknown')),  

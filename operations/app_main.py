@@ -1855,7 +1855,11 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                 col_widths[col_id] = 5  # Percentage values
                 remaining_width -= 5
                 allocated_columns += 1
-                
+            # Inside export_weekly_report_pdf function, where column widths are specified:
+            elif col_id == 'Project Description':
+                col_widths[col_id] = 12  # Wider column for descriptions
+                remaining_width -= 12
+                allocated_columns += 1
                 
                 
         # Distribute remaining width evenly among other columns
@@ -1960,13 +1964,17 @@ def generate_monthly_report(selected_date):
     # Define which columns to display (customize this list as needed)
     visible_columns = [
         'Project No', 
-        'Clients', 
-        'Status', 
         'PM', 
         'TL',
+        'Project Description',
+        'Clients', 
+        'Type', 
+        'Status', 
+        
+        
         'Service Line',     
         'Market Segment',  
-        'Type', 
+        
         #'Contracted Amount',
         'Projected',  
         'Actual',
@@ -1981,8 +1989,15 @@ def generate_monthly_report(selected_date):
     ]
     
     # Filter columns to only show the ones we want
-    display_columns = [col for col in all_columns if col['id'] in visible_columns]
-    
+    # Filter columns to only show the ones we want, maintaining the specified order
+    display_columns = []
+    for col_id in visible_columns:
+        for col in all_columns:
+            if col['id'] == col_id:
+                display_columns.append(col)
+                break
+            
+            
     for col in display_columns:
         if col['id'] == 'Service Line':
             col['name'] = 'SL'
@@ -1990,6 +2005,8 @@ def generate_monthly_report(selected_date):
             col['name'] = 'MS'
         elif col['id'] == 'ER DECON LLC':
             col['name'] = 'ER Decon LLC'
+        elif col['id'] == 'Clients':
+            col['name'] = 'Client'
     # Create a totals row
     totals_row = {col: '' for col in visible_columns}  # Initialize with empty strings for all columns
     totals_row['Project No'] = 'TOTAL:'
