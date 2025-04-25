@@ -11,7 +11,7 @@ from dash import dcc
 # Import our separate modules
 import data_processing
 import config
-from data_processing import extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
+from data_processing import calculate_new_er,extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
 import base64
 import plotly.io as pio
@@ -73,57 +73,6 @@ else:
     days_since_first_monday = (date_obj - first_monday).days
     return days_since_first_monday // 7 + 1
 """
-
-def calculate_new_er(df_project, project_no, df_merged_costs):
-    #print_cyan(f"DEBUG: Starting calculate_new_er for project_no = {project_no}")
-    
-    # Check if staff_type exists first
-    if 'staff_type' not in df_merged_costs.columns:
-        print_orange("DEBUG: 'staff_type' column not found in data")
-        print(f"Available columns: {df_merged_costs.columns.tolist()}")
-        return None
-    
-    project_row = df_project[df_project['Project No'] == project_no]
-    if project_row.empty or 'Contracted Amount' not in project_row.columns:
-        print("DEBUG: No project found or missing Contracted Amount column")
-        return None
-    
-    contracted_amount = project_row['Contracted Amount'].iloc[0]
-    # Parse contracted amount if it's a string
-    if isinstance(contracted_amount, str):
-        try:
-            contracted_amount = float(contracted_amount.replace('$', '').replace(',', ''))
-        except:
-            print(f"DEBUG: Could not parse contracted amount: {contracted_amount}")
-            return None
-    
-    if pd.isna(contracted_amount):
-        print("DEBUG: Contracted Amount is NaN")
-        return None
-    
-    # Filter costs for this project, handling NaN values
-    project_costs = df_merged_costs[df_merged_costs['jobcode_2'].notna() & 
-                                  df_merged_costs['jobcode_2'].str.startswith(project_no)]
-    
-    #print(f"DEBUG: Found {len(project_costs)} rows for project")
-    
-    # Check staff_type values and debug
-    #print(f"DEBUG: staff_type unique values: {project_costs['staff_type'].unique()}")
-    
-    # Sum costs by staff type (1 and 2)
-    # Change from string comparison to numeric comparison
-    type_1_cost = project_costs[project_costs['staff_type'] == 1]['day_cost'].sum()
-    type_2_cost = project_costs[project_costs['staff_type'] == 2]['day_cost'].sum()
-    
-    #print(f"DEBUG: type_1_cost = {type_1_cost}, type_2_cost = {type_2_cost}")
-    
-    if type_1_cost == 0:
-        #print("DEBUG: type_1_cost is 0, can't calculate ratio")
-        return None
-    
-    new_er = (contracted_amount - type_2_cost) / type_1_cost
-    #print(f"DEBUG: New ER calculated: {new_er}")
-    return new_er
 
 
 
@@ -499,6 +448,20 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                             'if': {'column_id': 'ER Invoiced', 'filter_query': '{ER Invoiced} > 2.5'},
                             'color': 'green', 'fontWeight': 'bold'
                         },
+                        
+                        
+                        {
+                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} < 1'},
+                            'color': 'red', 'fontWeight': 'bold'
+                        },
+                        {
+                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} >= 1 && {ER DECON LLC} <= 2.5'},
+                            'color': 'orange', 'fontWeight': 'bold'
+                        },
+                        {
+                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} > 2.5'},
+                            'color': 'green', 'fontWeight': 'bold'
+                        },
                     ]
                 ),
                 
@@ -658,7 +621,24 @@ def update_date_display(selected_date):
         date_obj = pd.to_datetime(selected_date)
         month_name = date_obj.strftime('%B')
         year = date_obj.year
-        return f"Selected: {month_name} {year}"
+        
+        # Calculate the week of the month using the same logic as in export function
+        # Get the first day of the month
+        first_day = date_obj.replace(day=1)
+        
+        # Find the week number using isocalendar
+        first_day_week = first_day.isocalendar()[1]
+        current_week = date_obj.isocalendar()[1]
+        
+        # Calculate week of month (1-based)
+        week_of_month = current_week - first_day_week + 1
+        
+        # Handle edge case where week spans across months/years
+        if week_of_month <= 0:
+            # We're in the same week as the end of the previous month
+            week_of_month = 1
+            
+        return f"Selected: {month_name} {year} - Week {week_of_month}"
     return ""
 
 
@@ -1738,41 +1718,42 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
         <meta charset="utf-8">
         <style>
           @page {{
-            size: 400mm 300mm;
-            margin-left: 0.3cm;    /* Smaller left margin */
-            margin-right: 0.8cm;   /* Smaller right margin */
-            margin-top: 1cm;
-            margin-bottom: 1cm;
+            size: letter landscape; /* US Letter in landscape orientation */
+            margin-left: 0.5cm;    /* Smaller left margin */
+            margin-right: 0.5cm;   /* Smaller right margin */
+            margin-top: 0.75cm;
+            margin-bottom: 0.75cm;
           }}
           body {{
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            font-size: 7px;  /* Even smaller font to fit more content */
+            font-size: 8px;  /* changed to slighlty larger font for better readability */
           }}
           table {{
-            width: 90%;  /* Use full width */
+            width: 100%;  /* Use full width */
             border-collapse: collapse;
-            table-layout: fixed;
+            table-layout: fixed; /* This ensures columns strictly respect their width settings */
           }}
           th, td {{
             border: 1px solid black;
-            padding: 2px;
+            padding: 3px 4px; /* Adjusted padding for better spacing */
             text-align: left;
             word-wrap: break-word;
             overflow: hidden;
-            max-width: 2cm;  /* Limit maximum width for any column */
+            max-width: 150px;  /* Limit maximum width for any column */
           }}
           th {{
             background-color: #f2f2f2;
             font-weight: bold;
           }}
-          h1 {{ font-size: 14px; text-align: center; margin: 6px 0; }}
-          h2 {{ font-size: 12px; text-align: center; margin: 5px 0; }}
-          h3 {{ font-size: 10px; text-align: center; margin: 4px 0; }}
+          h1 {{ font-size: 16px; text-align: center; margin: 6px 0; }}
+          h2 {{ font-size: 14px; text-align: center; margin: 5px 0; }}
+          h3 {{ font-size: 12px; text-align: center; margin: 4px 0; }}
           .er-low {{ color: red; font-weight: bold; }}
           .er-mid {{ color: orange; font-weight: bold; }}
           .er-high {{ color: green; font-weight: bold; }}
+          .logo-container {{ text-align: center; margin-bottom: 10px; }}
         </style>
       </head>
       <body>
@@ -1802,6 +1783,9 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                     return f"<td>{row['ER Invoiced']}</td>"
             return f"<td>{row.get('ER Invoiced', '')}</td>"
         
+        
+
+            
         # Calculate column width percentage based on number of columns
         columns = [c for c in table_columns if c['id'] != 'Original_Order']
         col_count = len(columns)
@@ -1815,24 +1799,24 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
         for col in columns:
             col_id = col['id']
             if col_id == 'Project No':
-                col_widths[col_id] = 7  # Project numbers
-                remaining_width -= 7
+                col_widths[col_id] = 9# Project numbers
+                remaining_width -= 9
                 allocated_columns += 1
             elif col_id == 'Clients':
-                col_widths[col_id] = 8  # Client names
-                remaining_width -= 8
+                col_widths[col_id] = 14  # Client names
+                remaining_width -= 14
                 allocated_columns += 1
             elif col_id == 'Status':
                 col_widths[col_id] = 3  # Status text
                 remaining_width -= 3
                 allocated_columns += 1
             elif col_id == 'PM':
-                col_widths[col_id] = 4  # Project manager initials
-                remaining_width -= 4
+                col_widths[col_id] = 3  # Project manager initials
+                remaining_width -= 3
                 allocated_columns += 1
             elif col_id == 'TL':  # Add this block for TL field
-                col_widths[col_id] = 4  # Task Lead initials
-                remaining_width -= 4
+                col_widths[col_id] = 3  # Task Lead initials
+                remaining_width -= 3
                 allocated_columns += 1
             elif col_id == 'Service Line':  # Add this
                 col_widths[col_id] = 3  # Service Line text
@@ -1846,10 +1830,33 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                 col_widths[col_id] = 3  # Type text
                 remaining_width -= 3
                 allocated_columns += 1
-            elif col_id in ['ER Contract', 'ER Invoiced']:
+            elif col_id == 'ER Invoiced':
                 col_widths[col_id] = 4  # ER values
                 remaining_width -= 4
                 allocated_columns += 1
+            elif col_id == 'ER DECON LLC':
+                col_widths[col_id] = 4  # Fix width of ER DECON LLC to match ER Invoiced
+                remaining_width -= 4
+                allocated_columns += 1
+            elif col_id == 'Projected':
+                col_widths[col_id] = 8  # Dollar amounts need adequate space
+                remaining_width -= 8
+                allocated_columns += 1
+            elif col_id == 'Actual':
+                col_widths[col_id] = 8  # Dollar amounts need adequate space
+                remaining_width -= 8
+                allocated_columns += 1
+            elif col_id == 'Invoiced %':
+                col_widths[col_id] = 5  # Percentage values
+                remaining_width -= 5
+                allocated_columns += 1
+                
+            elif col_id == 'ER Decon LLC':
+                col_widths[col_id] = 5  # Percentage values
+                remaining_width -= 5
+                allocated_columns += 1
+                
+                
                 
         # Distribute remaining width evenly among other columns
         remaining_cols = col_count - allocated_columns
@@ -1887,22 +1894,42 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                             html_string += f"<td style='text-align:left;'>{row['ER Invoiced']}</td>"
                     else:
                         html_string += f"<td style='text-align:left;'>{row['ER Invoiced']}</td>"
+                elif col_id == 'ER DECON LLC':
+                    # For ER DECON LLC, apply the same color formatting as ER Invoiced
+                    if row['ER DECON LLC'] != 'N/A':
+                        try:
+                            er_val = float(str(row['ER DECON LLC']).replace('$', '').replace(',', ''))
+                            if er_val < 1:
+                                html_string += f"<td class='er-low' style='text-align:left;'>{row['ER DECON LLC']}</td>"
+                            elif er_val <= 2.5:
+                                html_string += f"<td class='er-mid' style='text-align:left;'>{row['ER DECON LLC']}</td>"
+                            else:
+                                html_string += f"<td class='er-high' style='text-align:left;'>{row['ER DECON LLC']}</td>"
+                        except:
+                            html_string += f"<td style='text-align:left;'>{row['ER DECON LLC']}</td>"
+                    else:
+                        html_string += f"<td style='text-align:left;'>{row['ER DECON LLC']}</td>"
                 else:
                     html_string += f"<td style='text-align:left;'>{row.get(col_id, '')}</td>"  # Add style='text-align:left;'
             html_string += "</tr>"
     
+    from datetime import datetime
+    current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html_string += f"""
-        <div class="footer">Latest Data Update: {last_data_update}</div>
-      
-      </body>
+        </tbody></table>
+        <div class="footer">
+            Latest Data Update: {last_data_update} | Report Generated: {current_datetime}
+        </div>
+    </body>
     </html>
     """
     
     # Generate PDF from HTML with specific options
+    # Update the PDF file name to include week number for better identification:
     try:
         # Using CSS @page settings for landscape orientation
         pdf_bytes = weasyprint.HTML(string=html_string).write_pdf()
-        return dcc.send_bytes(pdf_bytes, f"monthly_report_{month_name}_{year}.pdf")
+        return dcc.send_bytes(pdf_bytes, f"monthly_report_{month_name}_{year}_week_{week_of_month}.pdf")
     except Exception as e:
         print_red(f"Error generating PDF: {str(e)}")
         return dcc.send_string(f"Error generating PDF: {str(e)}", "error.pdf")
@@ -1948,8 +1975,9 @@ def generate_monthly_report(selected_date):
         #'Total Invoice', 
         #'Total Cost',
         'Invoiced %',
-        'ER Contract', 
-        'ER Invoiced'
+        #'ER Contract', 
+        'ER Invoiced',
+        'ER DECON LLC'
     ]
     
     # Filter columns to only show the ones we want
@@ -1960,6 +1988,8 @@ def generate_monthly_report(selected_date):
             col['name'] = 'SL'
         elif col['id'] == 'Market Segment':
             col['name'] = 'MS'
+        elif col['id'] == 'ER DECON LLC':
+            col['name'] = 'ER Decon LLC'
     # Create a totals row
     totals_row = {col: '' for col in visible_columns}  # Initialize with empty strings for all columns
     totals_row['Project No'] = 'TOTAL:'
@@ -1987,26 +2017,9 @@ def generate_monthly_report(selected_date):
             actual_sum = sum(extract_numeric(row.get('Actual', 0)) for row in report_data)
             totals_row['Actual'] = f"${actual_sum:,.2f}" if actual_sum > 0 else "N/A"
         
-        # Calculate average for Invoiced % column - only including non-N/A values
-        if 'Invoiced %' in visible_columns:
-            invoiced_pct_values = [extract_numeric(row.get('Invoiced %', 0)) for row in report_data 
-                                  if row.get('Invoiced %', 'N/A') != 'N/A']
-            if invoiced_pct_values:
-                avg_invoiced_pct = sum(invoiced_pct_values) / len(invoiced_pct_values)
-                totals_row['Invoiced %'] = f"{avg_invoiced_pct:.1f}%"
-            else:
-                totals_row['Invoiced %'] = "N/A"
+
         
-        # Calculate average for ER Contract and ER Invoiced columns
-        for er_col in ['ER Contract', 'ER Invoiced']:
-            if er_col in visible_columns:
-                er_values = [extract_numeric(row.get(er_col, 0)) for row in report_data 
-                            if row.get(er_col, 'N/A') != 'N/A']
-                if er_values:
-                    avg_er = sum(er_values) / len(er_values)
-                    totals_row[er_col] = f"{avg_er:.2f}"
-                else:
-                    totals_row[er_col] = "N/A"
+
     
     # Append the totals row
     report_data.append(totals_row)

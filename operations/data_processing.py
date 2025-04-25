@@ -10,12 +10,64 @@ from datetime import datetime
 import glob
 #from funcs import print_green, print_cyan, print_orange, print_red #, extract_project_no
 warnings.simplefilter("ignore")  # Suppress warnings if desired
+# Near the top of the file with other imports
 
 PICKLE_OUTPUT_DIR = r"C:\Users\jose.pineda\Desktop\smart_decon\operations\pickles"
 
 # ==============================
 # HELPER & UTILITY FUNCTIONS
 # ==============================
+def calculate_new_er(df_project, project_no, df_merged_costs):
+    #print_cyan(f"DEBUG: Starting calculate_new_er for project_no = {project_no}")
+    
+    # Check if staff_type exists first
+    if 'staff_type' not in df_merged_costs.columns:
+        print_orange("DEBUG: 'staff_type' column not found in data")
+        print(f"Available columns: {df_merged_costs.columns.tolist()}")
+        return None
+    
+    project_row = df_project[df_project['Project No'] == project_no]
+    if project_row.empty or 'Contracted Amount' not in project_row.columns:
+        print("DEBUG: No project found or missing Contracted Amount column")
+        return None
+    
+    contracted_amount = project_row['Contracted Amount'].iloc[0]
+    # Parse contracted amount if it's a string
+    if isinstance(contracted_amount, str):
+        try:
+            contracted_amount = float(contracted_amount.replace('$', '').replace(',', ''))
+        except:
+            print(f"DEBUG: Could not parse contracted amount: {contracted_amount}")
+            return None
+    
+    if pd.isna(contracted_amount):
+        print("DEBUG: Contracted Amount is NaN")
+        return None
+    
+    # Filter costs for this project, handling NaN values
+    project_costs = df_merged_costs[df_merged_costs['jobcode_2'].notna() & 
+                                  df_merged_costs['jobcode_2'].str.startswith(project_no)]
+    
+    #print(f"DEBUG: Found {len(project_costs)} rows for project")
+    
+    # Check staff_type values and debug
+    #print(f"DEBUG: staff_type unique values: {project_costs['staff_type'].unique()}")
+    
+    # Sum costs by staff type (1 and 2)
+    # Change from string comparison to numeric comparison
+    type_1_cost = project_costs[project_costs['staff_type'] == 1]['day_cost'].sum()
+    type_2_cost = project_costs[project_costs['staff_type'] == 2]['day_cost'].sum()
+    
+    #print(f"DEBUG: type_1_cost = {type_1_cost}, type_2_cost = {type_2_cost}")
+    
+    if type_1_cost == 0:
+        #print("DEBUG: type_1_cost is 0, can't calculate ratio")
+        return None
+    
+    new_er = (contracted_amount - type_2_cost) / type_1_cost
+    #print(f"DEBUG: New ER calculated: {new_er}")
+    return new_er
+
 
 
 def generate_monthly_report_data(selected_date, global_projects_df, global_merged_df, global_raw_invoices, project_log_path):
@@ -205,6 +257,11 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 if match:
                     return match.group(1)
                 return value
+            
+            
+            # Calculate ER DECON LLC (excluding Colombian staff)
+            new_er = calculate_new_er(global_projects_df, project_no, global_merged_df)
+
             # Build the project record for the table
             project_record = {
                 'Project No': project_no,
@@ -230,7 +287,8 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Total Cost': f"${total_cost:,.2f}" if total_cost else "N/A",
                 'Invoiced %': f"{invoiced_percent:.1f}%" if invoiced_percent is not None else "N/A",
                 'ER Contract': f"{er_contract:.2f}" if er_contract else "N/A",
-                'ER Invoiced': f"{er_invoiced:.2f}" if er_invoiced else "N/A"
+                'ER Invoiced': f"{er_invoiced:.2f}" if er_invoiced else "N/A",
+                'ER DECON LLC': f"{new_er:.2f}" if new_er else "N/A" 
             }
 
             # Add Original_Order for sorting if available
