@@ -1845,102 +1845,32 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
 
             
         # Calculate column width percentage based on number of columns
-        columns = [c for c in table_columns if c['id'] != 'Original_Order']
+        columns = [c for c in table_columns if c['id'] != 'Original_Order' and c['id'] != 'Invoiced %_num']
         col_count = len(columns)
         
-        # Calculate optimal column widths - more precise allocation
-        col_widths = {}
-        remaining_width = 100
-        allocated_columns = 0
+        # Simple approach: evenly distribute widths
+        col_width_percent = 100 / col_count
+        col_widths = {col['id']: col_width_percent for col in columns}
         
-        # First, allocate fixed widths to specific columns
-        for col in columns:
-            col_id = col['id']
-            if col_id == 'Project No':
-                col_widths[col_id] = 9# Project numbers
-                remaining_width -= 9
-                allocated_columns += 1
-            elif col_id == 'Clients':
-                col_widths[col_id] = 12  # Client names
-                remaining_width -= 12
-                allocated_columns += 1
-            elif col_id == 'Status':
-                col_widths[col_id] = 3  # Status text
-                remaining_width -= 3
-                allocated_columns += 1
-            elif col_id == 'PM':
-                col_widths[col_id] = 3  # Project manager initials
-                remaining_width -= 3
-                allocated_columns += 1
-            elif col_id == 'TL':  # Add this block for TL field
-                col_widths[col_id] = 3  # Task Lead initials
-                remaining_width -= 3
-                allocated_columns += 1
-            elif col_id == 'Service Line':  # Add this
-                col_widths[col_id] = 3  # Service Line text
-                remaining_width -= 3
-                allocated_columns += 1
-            elif col_id == 'Market Segment':  # Add this
-                col_widths[col_id] = 3  # Market Segment text
-                remaining_width -= 3
-                allocated_columns += 1
-            elif col_id == 'Type':  # Add this
-                col_widths[col_id] = 3  # Type text
-                remaining_width -= 3
-                allocated_columns += 1
-            elif col_id == 'ER Invoiced':
-                col_widths[col_id] = 4  # ER values
-                remaining_width -= 4
-                allocated_columns += 1
-            elif col_id == 'ER DECON LLC':
-                col_widths[col_id] = 4  # Fix width of ER DECON LLC to match ER Invoiced
-                remaining_width -= 4
-                allocated_columns += 1
-            elif col_id == 'Projected':
-                col_widths[col_id] = 8  # Dollar amounts need adequate space
-                remaining_width -= 8
-                allocated_columns += 1
-            elif col_id == 'Actual':
-                col_widths[col_id] = 8  # Dollar amounts need adequate space
-                remaining_width -= 8
-                allocated_columns += 1
-            elif col_id == 'Invoiced %':
-                col_widths[col_id] = 5  # Percentage values
-                remaining_width -= 5
-                allocated_columns += 1
-                
-            elif col_id == 'ER Decon LLC':
-                col_widths[col_id] = 4  # Percentage values
-                remaining_width -= 4
-                allocated_columns += 1
-               
-       
-                
-                
-                
-                
-                
-            # Inside export_weekly_report_pdf function, where column widths are specified:
-            elif col_id == 'Project Description':
-                col_widths[col_id] = 12  # Wider column for descriptions
-                remaining_width -= 12
-                allocated_columns += 1
-                
-                
-        # Distribute remaining width evenly among other columns
-        remaining_cols = col_count - allocated_columns
-        if remaining_cols > 0:
-            width_per_remaining = remaining_width / remaining_cols
-            for col in columns:
-                col_id = col['id']
-                if col_id not in col_widths:
-                    col_widths[col_id] = width_per_remaining
+        # For key columns that need slight adjustments
+        # Just make minor adjustments rather than dramatic differences
+        col_widths['Project No'] = col_width_percent * 1.2  # Slightly wider
+        col_widths['Project Description'] = col_width_percent * 1.4  # Slightly wider
+        col_widths['Clients'] = col_width_percent * 1.2  # Slightly wider
+        col_widths['PM'] = col_width_percent * 0.6  # Slightly narrower
+        col_widths['TL'] = col_width_percent * 0.6  # Slightly narrower
+        col_widths['Type'] = col_width_percent * 0.6  # Slightly narrower
+        col_widths['Status'] = col_width_percent * 0.6  # Slightly narrower
+        col_widths['Service Line'] = col_width_percent * 0.6  # Slightly narrower
+        col_widths['Market Segment'] = col_width_percent * 0.6  # Slightly narrower
+        col_widths['SL'] = col_width_percent * 0.6  # Slightly narrower
+        col_widths['MS'] = col_width_percent * 0.6  # Slightly narrower
         
         # Custom HTML table with formatting
-        html_string += f"<table border='1' cellspacing='0' cellpadding='1'><thead><tr>"
+        html_string += f"<table border='1' cellspacing='0' cellpadding='1' style='width: 90%; margin: 0 auto;'><thead><tr>"
         for col in columns:
             col_id = col['id']
-            width = col_widths.get(col_id, 100/col_count)
+            width = col_widths.get(col_id, col_width_percent)
             html_string += f"<th style='width:{width:.1f}%; text-align: left;'>{col['name']}</th>"
         html_string += "</tr></thead><tbody>"
         
