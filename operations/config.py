@@ -80,10 +80,20 @@ DATA_CONDITIONAL_ER = [
     {'if': {'column_id': 'Value', 'filter_query': '{Field} = "DECON LLC ONLY ER" && {Value_num} < 1 && {Value_num} >= 1.2'}, 'color': 'orange', 'fontWeight': 'bold'},
     {'if': {'column_id': 'Value', 'filter_query': '{Field} = "DECON LLC ONLY ER" && {Value_num} < 1'}, 'color': 'red', 'fontWeight': 'bold'},
     
+    # Add conditional styling for DECON LLC Invoiced
+    {'if': {'column_id': 'Value', 'filter_query': '{Field} = "DECON LLC Invoiced" && {Value_num} < 1'}, 'color': 'red', 'fontWeight': 'bold'},
+    {'if': {'column_id': 'Value', 'filter_query': '{Field} = "DECON LLC Invoiced" && {Value_num} >= 1 && {Value_num} <= 2.5'}, 'color': 'orange', 'fontWeight': 'bold'},
+    {'if': {'column_id': 'Value', 'filter_query': '{Field} = "DECON LLC Invoiced" && {Value_num} > 2.5'}, 'color': 'green', 'fontWeight': 'bold'},
+    
     # For the client projects table, add similar conditions for the column directly
     {'if': {'column_id': 'DECON LLC ER', 'filter_query': '{DECON LLC ER} >= 2.5'}, 'color': 'green', 'fontWeight': 'bold'},
     {'if': {'column_id': 'DECON LLC ER', 'filter_query': '{DECON LLC ER} < 2.5 && {DECON LLC ER} >= 1.2'}, 'color': 'orange', 'fontWeight': 'bold'},
     {'if': {'column_id': 'DECON LLC ER', 'filter_query': '{DECON LLC ER} < 1'}, 'color': 'red', 'fontWeight': 'bold'},
+    
+    # Add direct column conditions for DECON LLC Invoiced
+    {'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} < 1'}, 'color': 'red', 'fontWeight': 'bold'},
+    {'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} >= 1 && {DECON LLC Invoiced} <= 2.5'}, 'color': 'orange', 'fontWeight': 'bold'},
+    {'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} > 2.5'}, 'color': 'green', 'fontWeight': 'bold'},
     
     # Total row styling (keep this at the end)
     {'if': {'filter_query': '{Project No} = "TOTAL"'}, 'fontWeight': 'bold'}
@@ -140,7 +150,32 @@ RIGHT_TABLE_RED_STYLE = [
         'color': 'green',
         'fontWeight': 'bold'
     },
-        # Add the same conditional styling for DECON LLC ONLY ER
+    # Add conditional styling for DECON LLC Invoiced
+    {
+        'if': {
+            'filter_query': '{DECON LLC Invoiced} < 1',
+            'column_id': 'DECON LLC Invoiced'
+        },
+        'color': 'red',
+        'fontWeight': 'bold'
+    },
+    {
+        'if': {
+            'filter_query': '{DECON LLC Invoiced} >= 1 && {DECON LLC Invoiced} <= 2.5',
+            'column_id': 'DECON LLC Invoiced'
+        },
+        'color': 'orange',
+        'fontWeight': 'bold'
+    },
+    {
+        'if': {
+            'filter_query': '{DECON LLC Invoiced} > 2.5',
+            'column_id': 'DECON LLC Invoiced'
+        },
+        'color': 'green',
+        'fontWeight': 'bold'
+    },
+    # Add the same conditional styling for DECON LLC ONLY ER
     {'if': {'column_id': 'Value', 'filter_query': '{Field} = "DECON LLC ONLY ER" && {Value_num} >= 2.5'}, 'color': 'green', 'fontWeight': 'bold'},
     {'if': {'column_id': 'Value', 'filter_query': '{Field} = "DECON LLC ONLY ER" && {Value_num} < 2.5 && {Value_num} >= 1.2'}, 'color': 'orange', 'fontWeight': 'bold'},
     {'if': {'column_id': 'Value', 'filter_query': '{Field} = "DECON LLC ONLY ER" && {Value_num} < 1'}, 'color': 'red', 'fontWeight': 'bold'},

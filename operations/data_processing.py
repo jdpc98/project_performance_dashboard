@@ -289,6 +289,10 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
 
             # Calculate Invoiced Percentage (total_invoice / contracted_amount)
             invoiced_percent = (total_invoice / contracted_amount * 100) if contracted_amount and total_invoice else None
+            
+            # Create a numeric version of Invoiced Percentage for conditional formatting
+            invoiced_percent_num = invoiced_percent if invoiced_percent is not None else -1  # Use -1 to represent N/A
+            
             def extract_number_part(value):
                 """Extract just the number prefix from strings like '1-Something', '2-Other', etc."""
                 if not isinstance(value, str):
@@ -355,13 +359,10 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Status': extract_number_part(project_row.get('Status', 'Unknown')),
                 'PM': project_row.get('PM', 'Unknown'),
                 'Project Description': project_row.get('Project Description', 'No Description'),
-                'TL': project_row.get('TL', 'Unkown'),
+                'TL': project_row.get('TL', 'Unknown'),
                 'Service Line': extract_number_part(project_row.get('Service Line', 'Unknown')),  
                 'Market Segment': extract_number_part(project_row.get('Market Segment', 'Unknown')),  
                 'Type': extract_number_part(project_row.get('Type', 'Unknown')),  
-                #'Service Line': project_row.get('Service Line', 'Unknown'),  
-                #'Market Segment': project_row.get('Market Segment', 'Unknown'),  
-                #'Type': project_row.get('Type', 'Unknown'),  
                 
                 'Contracted Amount': f"${contracted_amount:,.2f}" if contracted_amount else "N/A",
                 'Projected': f"${projected_value:,.2f}" if projected_value else "N/A",
@@ -371,6 +372,8 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Total Invoice': f"${total_invoice:,.2f}" if total_invoice else "N/A",
                 'Total Cost': f"${total_cost:,.2f}" if total_cost else "N/A",
                 'Invoiced %': f"{invoiced_percent:.1f}%" if invoiced_percent is not None else "N/A",
+                # Add hidden numeric column for Invoiced %
+                'Invoiced %_num': invoiced_percent_num,
                 'ER Contract': f"{er_contract:.2f}" if er_contract else "N/A",
                 'ER Invoiced': f"{er_invoiced:.2f}" if er_invoiced else "N/A",
                 'ER DECON LLC': f"{new_er:.2f}" if new_er else "N/A",
@@ -397,8 +400,15 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
         # Sort the projects by the original order
         active_project_details = sorted(active_project_details, key=lambda x: x.get('Original_Order', 999))
 
-        # Create columns for the table
-        columns = [{'name': col, 'id': col} for col in active_project_details[0].keys() if col != 'Original_Order']
+        # Create columns for the table - include the new hidden numeric column
+        columns = [{'name': col, 'id': col, 'type': 'text' if not col.endswith('_num') else 'numeric'} 
+                   for col in active_project_details[0].keys() 
+                   if col != 'Original_Order']
+
+        # Hide the numeric helper column
+        for col in columns:
+            if col['id'] == 'Invoiced %_num':
+                col['hidden'] = True
 
         # Remove Original_Order from the final data
         for record in active_project_details:

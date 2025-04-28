@@ -462,6 +462,43 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                             'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} > 2.5'},
                             'color': 'green', 'fontWeight': 'bold'
                         },
+                        {
+                            'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} < 1'},
+                            'color': 'red', 'fontWeight': 'bold'
+                        },
+                        {
+                            'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} >= 1 && {DECON LLC Invoiced} <= 2.5'},
+                            'color': 'orange', 'fontWeight': 'bold'
+                        },
+                        {
+                            'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} > 2.5'},
+                            'color': 'green', 'fontWeight': 'bold'
+                        },
+                        # Updated conditional formatting for Invoiced % using the numeric column
+                        {
+                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} < 0'},
+                            'color': 'red', 'fontWeight': 'bold'  # For N/A values (-1)
+                        },
+                        {
+                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} = 0'},
+                            'color': 'red', 'fontWeight': 'bold'  # For 0%
+                        },
+                        {
+                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} > 0 && {Invoiced %_num} < 60'},
+                            'color': 'darkorange', 'fontWeight': 'bold'  # 0-60%
+                        },
+                        {
+                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} >= 60 && {Invoiced %_num} < 80'},
+                            'color': 'gold', 'fontWeight': 'bold'  # 60-80%
+                        },
+                        {
+                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} >= 80 && {Invoiced %_num} < 90'},
+                            'color': 'yellowgreen', 'fontWeight': 'bold'  # 80-90%
+                        },
+                        {
+                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} >= 90 && {Invoiced %_num} <= 100'},
+                            'color': 'forestgreen', 'fontWeight': 'bold'  # 90-100%
+                        }
                     ]
                 ),
                 
@@ -750,8 +787,27 @@ def export_dashboard_pdf(n_clicks, left_data, right_data, service_data, invoice_
       <head>
         <meta charset="utf-8">
         <style>
-          body {{ font-family: Arial, sans-serif; margin: 20px; }}
-          table, th, td {{ border: 1px solid black; border-collapse: collapse; padding: 5px; }}
+          @page {{
+            size: letter landscape; /* US Letter in landscape orientation */
+            margin-left: 2cm;     /* INCREASED from 0.75cm to 2cm */
+            margin-right: 2cm;    /* INCREASED from 0.75cm to 2cm */
+            margin-top: 1.5cm;    /* INCREASED from 1cm */
+            margin-bottom: 1.5cm; /* INCREASED from 1cm */
+          }}
+          body {{
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            font-size: 9px;
+          }}
+          table {{
+            width: 90%;          /* REDUCED from 98% to 90% */
+            border-collapse: collapse;
+            table-layout: fixed;
+            margin: 0 auto;      /* Centers the table */
+            max-width: 90%;      /* Added max-width constraint */
+          }}
+          th, td {{ border: 1px solid black; border-collapse: collapse; padding: 5px; }}
           h1, h2 {{ text-align: center; }}
           img {{ display: block; margin-left: auto; margin-right: auto; max-width: 90%; }}
         </style>
@@ -1719,21 +1775,23 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
         <style>
           @page {{
             size: letter landscape; /* US Letter in landscape orientation */
-            margin-left: 0.5cm;    /* Smaller left margin */
-            margin-right: 0.5cm;   /* Smaller right margin */
-            margin-top: 0.75cm;
-            margin-bottom: 0.75cm;
+            margin-left: 2cm;     /* INCREASED from 0.75cm to 2cm */
+            margin-right: 2cm;    /* INCREASED from 0.75cm to 2cm */
+            margin-top: 1.5cm;    /* INCREASED from 1cm */
+            margin-bottom: 1.5cm; /* INCREASED from 1cm */
           }}
           body {{
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            font-size: 8px;  /* changed to slighlty larger font for better readability */
+            font-size: 9px;
           }}
           table {{
-            width: 100%;  /* Use full width */
+            width: 90%;          /* REDUCED from 98% to 90% */
             border-collapse: collapse;
-            table-layout: fixed; /* This ensures columns strictly respect their width settings */
+            table-layout: fixed;
+            margin: 0 auto;      /* Centers the table */
+            max-width: 90%;      /* Added max-width constraint */
           }}
           th, td {{
             border: 1px solid black;
@@ -1803,8 +1861,8 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                 remaining_width -= 9
                 allocated_columns += 1
             elif col_id == 'Clients':
-                col_widths[col_id] = 14  # Client names
-                remaining_width -= 14
+                col_widths[col_id] = 12  # Client names
+                remaining_width -= 12
                 allocated_columns += 1
             elif col_id == 'Status':
                 col_widths[col_id] = 3  # Status text
@@ -1852,9 +1910,16 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                 allocated_columns += 1
                 
             elif col_id == 'ER Decon LLC':
-                col_widths[col_id] = 5  # Percentage values
-                remaining_width -= 5
+                col_widths[col_id] = 4  # Percentage values
+                remaining_width -= 4
                 allocated_columns += 1
+               
+       
+                
+                
+                
+                
+                
             # Inside export_weekly_report_pdf function, where column widths are specified:
             elif col_id == 'Project Description':
                 col_widths[col_id] = 12  # Wider column for descriptions
@@ -1913,6 +1978,41 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date)
                             html_string += f"<td style='text-align:left;'>{row['ER DECON LLC']}</td>"
                     else:
                         html_string += f"<td style='text-align:left;'>{row['ER DECON LLC']}</td>"
+                elif col_id == 'DECON LLC Invoiced':
+                    # For DECON LLC Invoiced, apply the same color formatting
+                    if row.get('DECON LLC Invoiced', 'N/A') != 'N/A':
+                        try:
+                            er_val = float(str(row['DECON LLC Invoiced']).replace('$', '').replace(',', ''))
+                            if er_val < 1:
+                                html_string += f"<td class='er-low' style='text-align:left;'>{row['DECON LLC Invoiced']}</td>"
+                            elif er_val <= 2.5:
+                                html_string += f"<td class='er-mid' style='text-align:left;'>{row['DECON LLC Invoiced']}</td>"
+                            else:
+                                html_string += f"<td class='er-high' style='text-align:left;'>{row['DECON LLC Invoiced']}</td>"
+                        except:
+                            html_string += f"<td style='text-align:left;'>{row.get('DECON LLC Invoiced', 'N/A')}</td>"
+                    else:
+                        html_string += f"<td style='text-align:left;'>{row.get('DECON LLC Invoiced', 'N/A')}</td>"
+                elif col_id == 'Invoiced %':
+                    # For Invoiced %, apply custom color formatting based on percentage ranges
+                    if row.get('Invoiced %', 'N/A') in ['N/A', '0.0%', '']:
+                        html_string += f"<td style='text-align:left; color: red; font-weight: bold;'>{row.get('Invoiced %', 'N/A')}</td>"
+                    else:
+                        try:
+                            # Extract percentage value
+                            percent_val = float(str(row['Invoiced %']).replace('%', ''))
+                            if percent_val < 60:
+                                html_string += f"<td style='text-align:left; color: darkorange; font-weight: bold;'>{row['Invoiced %']}</td>"
+                            elif percent_val >= 60 and percent_val <= 80:
+                                html_string += f"<td style='text-align:left; color: gold; font-weight: bold;'>{row['Invoiced %']}</td>"
+                            elif percent_val > 80 and percent_val <= 90:
+                                html_string += f"<td style='text-align:left; color: yellowgreen; font-weight: bold;'>{row['Invoiced %']}</td>"
+                            elif percent_val > 90:
+                                html_string += f"<td style='text-align:left; color: forestgreen; font-weight: bold;'>{row['Invoiced %']}</td>"
+                            else:
+                                html_string += f"<td style='text-align:left;'>{row['Invoiced %']}</td>"
+                        except:
+                            html_string += f"<td style='text-align:left;'>{row.get('Invoiced %', 'N/A')}</td>"
                 else:
                     html_string += f"<td style='text-align:left;'>{row.get(col_id, '')}</td>"  # Add style='text-align:left;'
             html_string += "</tr>"
@@ -1984,7 +2084,7 @@ def generate_monthly_report(selected_date):
         #'Total Cost',
         'Invoiced %',
         #'ER Contract', 
-        'ER Invoiced',
+        #'ER Invoiced',
         #'ER DECON LLC',
         'DECON LLC Invoiced'
     ]
@@ -2008,8 +2108,8 @@ def generate_monthly_report(selected_date):
             col['name'] = 'ER Decon LLC'
         elif col['id'] == 'Clients':
             col['name'] = 'Client'
-        elif col['DECON LLC Invoiced'] == 'ER DECON LLC':
-            col['name'] = 'Client'
+        elif col['id'] == 'DECON LLC Invoiced':
+            col['name'] = 'ER DECON LLC'
     # Create a totals row
     totals_row = {col: '' for col in visible_columns}  # Initialize with empty strings for all columns
     totals_row['Project No'] = 'TOTAL:'
@@ -2329,4 +2429,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-    app.run(debug=True, host='10.1.2.149', port=7050, use_reloader=False)   # print(">>> main() returned. Now starting server.")
+    #app.run_server(debug=True, host='10.1.2.189', port=8050, use_reloader=False) 
+    #app.run(debug=True, host='localhost', port=7050, use_reloader=False)  
+    app.run(debug=True, host='0.0.0.0', port=7050, use_reloader=False)
