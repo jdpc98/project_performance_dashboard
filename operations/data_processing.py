@@ -18,6 +18,23 @@ PICKLE_OUTPUT_DIR = r"C:\Users\jose.pineda\Desktop\smart_decon\operations\pickle
 # HELPER & UTILITY FUNCTIONS
 # ==============================
 def calculate_new_er(df_project, project_no, df_merged_costs):
+    # First, check if the project has 0% invoiced
+    project_row = df_project[df_project['Project No'] == project_no]
+    if not project_row.empty:
+        # Try to extract invoiced percentage
+        if 'Invoiced %' in project_row.columns:
+            try:
+                invoiced_pct = project_row['Invoiced %'].iloc[0]
+                # Handle string percentage values (with % symbol)
+                if isinstance(invoiced_pct, str) and '%' in invoiced_pct:
+                    invoiced_pct = float(invoiced_pct.replace('%', '').strip())
+                # If invoice percentage is 0%, return 0 for ER DECON LLC
+                if invoiced_pct == 0:
+                    return 0
+            except:
+                pass  # Continue with normal calculation if there's an error
+    
+    # Continue with existing functionality
     #print_cyan(f"DEBUG: Starting calculate_new_er for project_no = {project_no}")
     
     # Check if staff_type exists first
@@ -68,6 +85,70 @@ def calculate_new_er(df_project, project_no, df_merged_costs):
     #print(f"DEBUG: New ER calculated: {new_er}")
     return new_er
 
+
+def calculate_decon_llc_invoiced(df_project, project_no, df_merged_costs, df_raw_invoices):
+    """
+    Calculate the DECON LLC Invoiced ratio: (Invoiced Amount - Type 2 Cost) / Type 1 Cost
+    
+    Args:
+        df_project: DataFrame containing project information
+        project_no: Project number to calculate for
+        df_merged_costs: DataFrame containing timesheet and rate information
+        df_raw_invoices: DataFrame containing invoice information
+        
+    Returns:
+        float: DECON LLC Invoiced value or None if can't be calculated
+    """
+    # First, check if the project has 0% invoiced
+    project_row = df_project[df_project['Project No'] == project_no]
+    if not project_row.empty:
+        # Try to extract invoiced percentage
+        if 'Invoiced %' in project_row.columns:
+            try:
+                invoiced_pct = project_row['Invoiced %'].iloc[0]
+                # Handle string percentage values (with % symbol)
+                if isinstance(invoiced_pct, str) and '%' in invoiced_pct:
+                    invoiced_pct = float(invoiced_pct.replace('%', '').strip())
+                # If invoice percentage is 0%, return 0
+                if invoiced_pct == 0:
+                    return 0
+            except:
+                pass
+
+    # Check if staff_type exists
+    if 'staff_type' not in df_merged_costs.columns:
+        print_orange("DEBUG: 'staff_type' column not found in data")
+        return None
+    
+    # Get the total invoiced amount for this project
+    invoiced_amount = None
+    project_invoices = df_raw_invoices[df_raw_invoices['Project No'].apply(
+        lambda x: standardize_project_no(str(x)) == project_no
+    )]
+    
+    if not project_invoices.empty:
+        # Convert 'Actual' column to numeric before summing
+        project_invoices['Actual'] = pd.to_numeric(project_invoices['Actual'], errors='coerce')
+        invoiced_amount = project_invoices['Actual'].sum()
+    
+    if pd.isna(invoiced_amount) or invoiced_amount == 0:
+        #print_orange(f"DEBUG: No invoices found for project {project_no}")
+        return None
+    
+    # Filter costs for this project
+    project_costs = df_merged_costs[df_merged_costs['jobcode_2'].notna() & 
+                                  df_merged_costs['jobcode_2'].str.startswith(project_no)]
+    
+    # Sum costs by staff type (1 and 2)
+    type_1_cost = project_costs[project_costs['staff_type'] == 1]['day_cost'].sum()
+    type_2_cost = project_costs[project_costs['staff_type'] == 2]['day_cost'].sum()
+    
+    if type_1_cost == 0:
+        return None
+    
+    # Calculate DECON LLC Invoiced
+    decon_llc_invoiced = (invoiced_amount - type_2_cost) / type_1_cost
+    return decon_llc_invoiced
 
 
 def generate_monthly_report_data(selected_date, global_projects_df, global_merged_df, global_raw_invoices, project_log_path):
@@ -200,6 +281,27 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
             er_contract = contracted_amount / total_cost if total_cost > 0 and contracted_amount else None
             er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice else None
 
+            # Calculate ER DECON LLC (excluding Colombian staff)
+            new_er = calculate_new_er(global_projects_df, project_no, global_merged_df)
+            
+            # Calculate DECON LLC Invoiced (excluding Colombian staff for invoiced amount)
+            decon_llc_invoiced = calculate_decon_llc_invoiced(global_projects_df, project_no, global_merged_df, global_raw_invoices)
+
+            # Calculate Invoiced Percentage (total_invoice / contracted_amount)
+            invoiced_percent = (total_invoice / contracted_amount * 100) if contracted_amount and total_invoice else None
+            def extract_number_part(value):
+                """Extract just the number prefix from strings like '1-Something', '2-Other', etc."""
+                if not isinstance(value, str):
+                    return value
+                
+                # Look for patterns like "1-", "2.", "3:", etc.
+                import re
+                match = re.match(r'^(\d+)[-\.\s:]', value)
+                if match:
+                    return match.group(1)
+                return value
+            
+            
             # Get Projected, Actual, and Acummulative from the sheet for this project
             project_month_data = df_month[df_month[project_column].apply(
                 lambda x: standardize_project_no(str(x)) == project_no
@@ -244,23 +346,6 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                         acummulative_value = float(acummulative_value) if pd.notnull(acummulative_value) else None
                     except:
                         acummulative_value = None
-            # Calculate Invoiced Percentage (total_invoice / contracted_amount)
-            invoiced_percent = (total_invoice / contracted_amount * 100) if contracted_amount and total_invoice else None
-            def extract_number_part(value):
-                """Extract just the number prefix from strings like '1-Something', '2-Other', etc."""
-                if not isinstance(value, str):
-                    return value
-                
-                # Look for patterns like "1-", "2.", "3:", etc.
-                import re
-                match = re.match(r'^(\d+)[-\.\s:]', value)
-                if match:
-                    return match.group(1)
-                return value
-            
-            
-            # Calculate ER DECON LLC (excluding Colombian staff)
-            new_er = calculate_new_er(global_projects_df, project_no, global_merged_df)
 
             # Build the project record for the table
             project_record = {
@@ -288,7 +373,8 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Invoiced %': f"{invoiced_percent:.1f}%" if invoiced_percent is not None else "N/A",
                 'ER Contract': f"{er_contract:.2f}" if er_contract else "N/A",
                 'ER Invoiced': f"{er_invoiced:.2f}" if er_invoiced else "N/A",
-                'ER DECON LLC': f"{new_er:.2f}" if new_er else "N/A" 
+                'ER DECON LLC': f"{new_er:.2f}" if new_er else "N/A",
+                'DECON LLC Invoiced': f"{decon_llc_invoiced:.2f}" if decon_llc_invoiced else "N/A"
             }
 
             # Add Original_Order for sorting if available
@@ -1084,5 +1170,3 @@ if __name__ == "__main__":
         precompute_and_save()
     else:
         main()
-
-

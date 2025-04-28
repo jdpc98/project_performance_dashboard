@@ -1985,7 +1985,8 @@ def generate_monthly_report(selected_date):
         'Invoiced %',
         #'ER Contract', 
         'ER Invoiced',
-        'ER DECON LLC'
+        #'ER DECON LLC',
+        'DECON LLC Invoiced'
     ]
     
     # Filter columns to only show the ones we want
@@ -2006,6 +2007,8 @@ def generate_monthly_report(selected_date):
         elif col['id'] == 'ER DECON LLC':
             col['name'] = 'ER Decon LLC'
         elif col['id'] == 'Clients':
+            col['name'] = 'Client'
+        elif col['DECON LLC Invoiced'] == 'ER DECON LLC':
             col['name'] = 'Client'
     # Create a totals row
     totals_row = {col: '' for col in visible_columns}  # Initialize with empty strings for all columns
