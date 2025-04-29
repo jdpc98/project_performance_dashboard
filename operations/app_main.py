@@ -1858,7 +1858,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
           th, td {{
             border: 1px solid black;
             padding: 3px 4px; /* Adjusted padding for better spacing */
-            text-align: left;
+            text-align: center; /* Default alignment is center */
             word-wrap: break-word;
             overflow: hidden;
             max-width: 150px;  /* Limit maximum width for any column */
@@ -1866,6 +1866,12 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
           th {{
             background-color: #f2f2f2;
             font-weight: bold;
+          }}
+          .text-left {{
+            text-align: left;
+          }}
+          .text-right {{
+            text-align: right;
           }}
           h1 {{ font-size: 16px; text-align: center; margin: 6px 0; }}
           h2 {{ font-size: 14px; text-align: center; margin: 5px 0; }}
@@ -1931,19 +1937,28 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
                 col_name = col['name'] if 'name' in col else col_id
                 value = row.get(col_id, '')
                 
+                # Determine text alignment based on column type
+                text_align_class = ''
+                # Left align text for descriptive fields
+                if col_id in ['Project No', 'Project Description', 'Clients']:
+                    text_align_class = 'class="text-left"'
+                # Right align text for monetary values
+                elif any(money_term in col_id for money_term in ['ER', 'Fee', 'Projected', 'Actual', 'Contract']):
+                    text_align_class = 'class="text-right"'
+                
                 # Apply conditional formatting for ER values
                 if col_id == 'ER DECON LLC' or col_id == 'DECON LLC Invoiced' or col_id == 'ER Invoiced':
                     try:
                         # Remove % and convert to float for comparison
                         numeric_value = float(str(value).replace('%', '').replace('$', '').replace(',', ''))
                         if numeric_value < 1:
-                            html_string += f"<td class='er-low'>{value}</td>"
+                            html_string += f"<td class='er-low text-right'>{value}</td>"
                         elif numeric_value <= 2.5:
-                            html_string += f"<td class='er-mid'>{value}</td>"
+                            html_string += f"<td class='er-mid text-right'>{value}</td>"
                         else:
-                            html_string += f"<td class='er-high'>{value}</td>"
+                            html_string += f"<td class='er-high text-right'>{value}</td>"
                     except:
-                        html_string += f"<td>{value}</td>"
+                        html_string += f"<td {text_align_class}>{value}</td>"
                 # Apply conditional formatting for Invoiced %
                 elif col_id == 'Invoiced %':
                     try:
@@ -1965,7 +1980,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
                     except:
                         html_string += f"<td>{value}</td>"
                 else:
-                    html_string += f"<td>{value}</td>"
+                    html_string += f"<td {text_align_class}>{value}</td>"
             html_string += "</tr>"
         html_string += "</tbody></table>"
     
@@ -1986,6 +2001,12 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
                 col_id = col['id']
                 value = row.get(col_id, '')
                 
+                # Determine text alignment based on column type
+                text_align_class = ''
+                # Right align text for monetary values
+                if col_id in ['Projected', 'Actual']:
+                    text_align_class = 'class="text-right"'
+                
                 # Apply conditional formatting for %Forecast vs Actual
                 if col_id == '%Forecast vs Actual':
                     try:
@@ -1999,7 +2020,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
                     except:
                         html_string += f"<td>{value}</td>"
                 else:
-                    html_string += f"<td>{value}</td>"
+                    html_string += f"<td {text_align_class}>{value}</td>"
             
             html_string += "</tr>"
         
@@ -2024,11 +2045,25 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
                 col_id = col['id']
                 value = row.get(col_id, '')
                 
+                # Determine text alignment based on column type
+                text_align_class = ''
+                # Left align Type column
+                if col_id == 'Type':
+                    text_align_class = 'class="text-left"'
+                # Right align text for monetary values
+                elif col_id in ['Projected', 'Actual']:
+                    text_align_class = 'class="text-right"'
+                
                 # Apply conditional formatting for Percentage column
                 if col_id == 'Percentage Projected vs Actual':
                     try:
                         numeric_value = float(str(value).replace('%', ''))
-                        if numeric_value < 30:
+                        style_class = ""
+                        
+                        # Fix for 100% value - this should be green, not red
+                        if numeric_value == 100:
+                            html_string += f"<td class='forecast-percentage-high'>{value}</td>"
+                        elif numeric_value < 30:
                             html_string += f"<td class='forecast-percentage-low'>{value}</td>"
                         elif numeric_value < 75:
                             html_string += f"<td class='forecast-percentage-med'>{value}</td>"
@@ -2037,7 +2072,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
                     except:
                         html_string += f"<td>{value}</td>"
                 else:
-                    html_string += f"<td>{value}</td>"
+                    html_string += f"<td {text_align_class}>{value}</td>"
             
             html_string += "</tr>"
         
