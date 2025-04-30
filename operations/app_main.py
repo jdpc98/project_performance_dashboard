@@ -11,7 +11,7 @@ from dash import dcc
 # Import our separate modules
 import data_processing
 import config
-from data_processing import calculate_new_er,extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
+from data_processing import extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
 import base64
 import plotly.io as pio
@@ -73,6 +73,57 @@ else:
     days_since_first_monday = (date_obj - first_monday).days
     return days_since_first_monday // 7 + 1
 """
+
+def calculate_new_er(df_project, project_no, df_merged_costs):
+    #print_cyan(f"DEBUG: Starting calculate_new_er for project_no = {project_no}")
+    
+    # Check if staff_type exists first
+    if 'staff_type' not in df_merged_costs.columns:
+        print_orange("DEBUG: 'staff_type' column not found in data")
+        print(f"Available columns: {df_merged_costs.columns.tolist()}")
+        return None
+    
+    project_row = df_project[df_project['Project No'] == project_no]
+    if project_row.empty or 'Contracted Amount' not in project_row.columns:
+        print("DEBUG: No project found or missing Contracted Amount column")
+        return None
+    
+    contracted_amount = project_row['Contracted Amount'].iloc[0]
+    # Parse contracted amount if it's a string
+    if isinstance(contracted_amount, str):
+        try:
+            contracted_amount = float(contracted_amount.replace('$', '').replace(',', ''))
+        except:
+            print(f"DEBUG: Could not parse contracted amount: {contracted_amount}")
+            return None
+    
+    if pd.isna(contracted_amount):
+        print("DEBUG: Contracted Amount is NaN")
+        return None
+    
+    # Filter costs for this project, handling NaN values
+    project_costs = df_merged_costs[df_merged_costs['jobcode_2'].notna() & 
+                                  df_merged_costs['jobcode_2'].str.startswith(project_no)]
+    
+    #print(f"DEBUG: Found {len(project_costs)} rows for project")
+    
+    # Check staff_type values and debug
+    #print(f"DEBUG: staff_type unique values: {project_costs['staff_type'].unique()}")
+    
+    # Sum costs by staff type (1 and 2)
+    # Change from string comparison to numeric comparison
+    type_1_cost = project_costs[project_costs['staff_type'] == 1]['day_cost'].sum()
+    type_2_cost = project_costs[project_costs['staff_type'] == 2]['day_cost'].sum()
+    
+    #print(f"DEBUG: type_1_cost = {type_1_cost}, type_2_cost = {type_2_cost}")
+    
+    if type_1_cost == 0:
+        #print("DEBUG: type_1_cost is 0, can't calculate ratio")
+        return None
+    
+    new_er = (contracted_amount - type_2_cost) / type_1_cost
+    #print(f"DEBUG: New ER calculated: {new_er}")
+    return new_er
 
 
 
@@ -199,8 +250,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                         columns=[{'name': 'Field', 'id': 'Field'}, {'name': 'Value', 'id': 'Value'}],
                         data=[],
                         style_table=config.TABLE_STYLE,
-                        #style_cell=config.TABLE_CELL_STYLE,
-                        style_cell={'textAlign': 'left', 'padding': '5px', 'fontFamily': 'Calibri, sans-serif'},
+                        style_cell=config.TABLE_CELL_STYLE,
                         style_cell_conditional=config.TABLE_CELL_CONDITIONAL
                     )
                 ], style={'width': '40%', 'display': 'inline-block', 'verticalAlign': 'top', 'padding': '10px', 'margin': '10px'}),
@@ -362,8 +412,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                 columns=[{'name': 'Metric', 'id': 'Metric'}, {'name': 'Value', 'id': 'Value'}],
                 data=[],
                 style_table={'width': '40%', 'margin': 'auto', 'overflowY': 'auto'},
-                #style_cell=TABLE_CELL_STYLE
-                style_cell={'textAlign': 'left', 'fontFamily': 'Calibri, sans-serif'}
+                style_cell=TABLE_CELL_STYLE
             ),
             # Title for Detailed Projects Table
             html.H3("Project Summary", style={'textAlign': 'center', 'fontFamily': 'Calibri, sans-serif', 'margin-top': '20px'}),
@@ -374,7 +423,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                 columns=[],  # set via callback
                 data=[],     # set via callback
                 style_table={'width': '80%', 'margin': 'auto', 'overflowY': 'auto'},
-                style_cell={'textAlign': 'left', 'fontFamily': 'Calibri, sans-serif'},
+                style_cell={'textAlign': 'center', 'fontFamily': 'Calibri, sans-serif'},
                 style_data_conditional=config.RIGHT_TABLE_RED_STYLE
 
             ), # New: Date range picker for invoice dates
@@ -433,7 +482,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                     columns=[],
                     data=[],
                     style_table={'width': '95%', 'margin': 'auto', 'overflowX': 'auto'},
-                    style_cell={'textAlign': 'left', 'fontFamily': 'Calibri, sans-serif'},
+                    style_cell={'textAlign': 'center', 'fontFamily': 'Calibri, sans-serif'},
                     style_header={'backgroundColor': '#f8f9fa', 'fontWeight': 'bold'},
                     style_data_conditional=[
                         {
@@ -448,117 +497,11 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                             'if': {'column_id': 'ER Invoiced', 'filter_query': '{ER Invoiced} > 2.5'},
                             'color': 'green', 'fontWeight': 'bold'
                         },
-                        
-                        
-                        {
-                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} < 1'},
-                            'color': 'red', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} >= 1 && {ER DECON LLC} <= 2.5'},
-                            'color': 'orange', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} > 2.5'},
-                            'color': 'green', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} < 1'},
-                            'color': 'red', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} >= 1 && {DECON LLC Invoiced} <= 2.5'},
-                            'color': 'orange', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': 'DECON LLC Invoiced', 'filter_query': '{DECON LLC Invoiced} > 2.5'},
-                            'color': 'green', 'fontWeight': 'bold'
-                        },
-                        # Updated conditional formatting for Invoiced % using the numeric column
-                        {
-                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} < 0'},
-                            'color': 'red', 'fontWeight': 'bold'  # For N/A values (-1)
-                        },
-                        {
-                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} = 0'},
-                            'color': 'red', 'fontWeight': 'bold'  # For 0%
-                        },
-                        {
-                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} > 0 && {Invoiced %_num} < 60'},
-                            'color': 'darkorange', 'fontWeight': 'bold'  # 0-60%
-                        },
-                        {
-                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} >= 60 && {Invoiced %_num} < 80'},
-                            'color': 'gold', 'fontWeight': 'bold'  # 60-80%
-                        },
-                        {
-                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} >= 80 && {Invoiced %_num} < 90'},
-                            'color': 'yellowgreen', 'fontWeight': 'bold'  # 80-90%
-                        },
-                        {
-                            'if': {'column_id': 'Invoiced %', 'filter_query': '{Invoiced %_num} >= 90 && {Invoiced %_num} <= 100'},
-                            'color': 'forestgreen', 'fontWeight': 'bold'  # 90-100%
-                        }
                     ]
                 ),
-            ], style={'padding': '20px'}),
-            
-            # Forecast summary table
-            html.Div([
-                html.H3("Forecast Summary", style={'textAlign': 'center'}),
-                dash_table.DataTable(
-                    id='forecast-summary-table',
-                    columns=[],
-                    data=[],
-                    style_table={'width': '70%', 'margin': 'auto', 'overflowX': 'auto'},
-                    style_cell={'textAlign': 'left', 'fontFamily': 'Calibri, sans-serif'},
-                    style_header={'backgroundColor': '#f8f9fa', 'fontWeight': 'bold'},
-                    style_data_conditional=[
-                        {
-                            'if': {'column_id': '%Forecast vs Actual', 'filter_query': '{%Forecast vs Actual} < "30%"'},
-                            'color': 'red', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': '%Forecast vs Actual', 'filter_query': '{%Forecast vs Actual} >= "30%" && {%Forecast vs Actual} < "75%"'},
-                            'color': 'orange', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': '%Forecast vs Actual', 'filter_query': '{%Forecast vs Actual} >= "75%"'},
-                            'color': 'green', 'fontWeight': 'bold'
-                        }
-                    ]
-                )
-            ], style={'padding': '20px'}),
-            
-            # Forecast by type table
-            html.Div([
-                html.H3("Forecast by Type", style={'textAlign': 'center'}),
-                dash_table.DataTable(
-                    id='forecast-type-table',
-                    columns=[],
-                    data=[],
-                    style_table={'width': '80%', 'margin': 'auto', 'overflowX': 'auto'},
-                    style_cell={'textAlign': 'left', 'fontFamily': 'Calibri, sans-serif'},
-                    style_header={'backgroundColor': '#f8f9fa', 'fontWeight': 'bold'},
-                    style_data_conditional=[
-                        {
-                            'if': {'column_id': 'Percentage Projected vs Actual', 'filter_query': '{Percentage Projected vs Actual} < "30%"'},
-                            'color': 'red', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': 'Percentage Projected vs Actual', 'filter_query': '{Percentage Projected vs Actual} >= "30%" && {Percentage Projected vs Actual} < "75%"'},
-                            'color': 'orange', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'column_id': 'Percentage Projected vs Actual', 'filter_query': '{Percentage Projected vs Actual} >= "75%"'},
-                            'color': 'green', 'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'row_index': -1},  # Last row (TOTAL)
-                            'fontWeight': 'bold'
-                        }
-                    ]
-                )
+                
+                
+                
             ], style={'padding': '20px'}),
             
             # Export button
@@ -713,24 +656,7 @@ def update_date_display(selected_date):
         date_obj = pd.to_datetime(selected_date)
         month_name = date_obj.strftime('%B')
         year = date_obj.year
-        
-        # Calculate the week of the month using the same logic as in export function
-        # Get the first day of the month
-        first_day = date_obj.replace(day=1)
-        
-        # Find the week number using isocalendar
-        first_day_week = first_day.isocalendar()[1]
-        current_week = date_obj.isocalendar()[1]
-        
-        # Calculate week of month (1-based)
-        week_of_month = current_week - first_day_week + 1
-        
-        # Handle edge case where week spans across months/years
-        if week_of_month <= 0:
-            # We're in the same week as the end of the previous month
-            week_of_month = 1
-            
-        return f"Selected: {month_name} {year} - Week {week_of_month}"
+        return f"Selected: {month_name} {year}"
     return ""
 
 
@@ -842,27 +768,8 @@ def export_dashboard_pdf(n_clicks, left_data, right_data, service_data, invoice_
       <head>
         <meta charset="utf-8">
         <style>
-          @page {{
-            size: letter landscape; /* US Letter in landscape orientation */
-            margin-left: 2cm;     /* INCREASED from 0.75cm to 2cm */
-            margin-right: 2cm;    /* INCREASED from 0.75cm to 2cm */
-            margin-top: 1.5cm;    /* INCREASED from 1cm */
-            margin-bottom: 1.5cm; /* INCREASED from 1cm */
-          }}
-          body {{
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            font-size: 9px;
-          }}
-          table {{
-            width: 90%;          /* REDUCED from 98% to 90% */
-            border-collapse: collapse;
-            table-layout: fixed;
-            margin: 0 auto;      /* Centers the table */
-            max-width: 90%;      /* Added max-width constraint */
-          }}
-          th, td {{ border: 1px solid black; border-collapse: collapse; padding: 5px; }}
+          body {{ font-family: Arial, sans-serif; margin: 20px; }}
+          table, th, td {{ border: 1px solid black; border-collapse: collapse; padding: 5px; }}
           h1, h2 {{ text-align: center; }}
           img {{ display: block; margin-left: auto; margin-right: auto; max-width: 90%; }}
         </style>
@@ -1785,38 +1692,17 @@ project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projec
     Input("export-weekly-report", "n_clicks"),
     [State('weekly-report-table', 'data'),
      State('weekly-report-table', 'columns'),
-     State('forecast-summary-table', 'data'),
-     State('forecast-summary-table', 'columns'),
-     State('forecast-type-table', 'data'),
-     State('forecast-type-table', 'columns'),
      State('report-week-picker', 'date')],
     prevent_initial_call=True
 )
-def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summary_data, forecast_summary_columns, 
-                            forecast_type_data, forecast_type_columns, selected_date):
+def export_weekly_report_pdf(n_clicks, table_data, table_columns, selected_date):
     if not selected_date or not table_data:
         return dcc.send_string("No data to export", "empty_report.pdf")
     
     date_obj = pd.to_datetime(selected_date)
     month_name = date_obj.strftime('%B')
     year = date_obj.year
-    # Better week calculation that handles Mondays correctly
-    # Get the first day of the month
-    first_day = date_obj.replace(day=1)
     
-    # Find the week number using isocalendar
-    # This returns a tuple (year, week_number, weekday)
-    first_day_week = first_day.isocalendar()[1]
-    current_week = date_obj.isocalendar()[1]
-    
-    # Calculate week of month (1-based)
-    # If the first day of the month and the selected date are in different ISO weeks
-    week_of_month = current_week - first_day_week + 1
-    
-    # Handle edge case where week spans across months/years
-    if week_of_month <= 0:
-        # We're in the same week as the end of the previous month
-        week_of_month = 1
     # Get the last data update date
     try:
         with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "r") as f:
@@ -1826,8 +1712,6 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
     
     # Convert table data to DataFrames
     df_all = pd.DataFrame(table_data) if table_data else pd.DataFrame()
-    df_forecast_summary = pd.DataFrame(forecast_summary_data) if forecast_summary_data else pd.DataFrame()
-    df_forecast_type = pd.DataFrame(forecast_type_data) if forecast_type_data else pd.DataFrame()
     
     # Create HTML string for the report
     html_string = f"""
@@ -1836,371 +1720,174 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
         <meta charset="utf-8">
         <style>
           @page {{
-            size: letter landscape; /* US Letter in landscape orientation */
-            margin-left: 2cm;     /* INCREASED from 0.75cm to 2cm */
-            margin-right: 2cm;    /* INCREASED from 0.75cm to 2cm */
-            margin-top: 1.5cm;    /* INCREASED from 1cm */
-            margin-bottom: 1.5cm; /* INCREASED from 1cm */
+            size: 500mm 300mm;
+            margin-left: 0.3cm;    /* Smaller left margin */
+            margin-right: 0.8cm;   /* Smaller right margin */
+            margin-top: 1cm;
+            margin-bottom: 1cm;
           }}
           body {{
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            font-size: 9px;
+            font-size: 7px;  /* Even smaller font to fit more content */
           }}
           table {{
-            width: 90%;          /* REDUCED from 98% to 90% */
+            width: 90%;  /* Use full width */
             border-collapse: collapse;
             table-layout: fixed;
-            margin: 0 auto;      /* Centers the table */
-            max-width: 90%;      /* Added max-width constraint */
           }}
           th, td {{
             border: 1px solid black;
-            padding: 3px 4px; /* Adjusted padding for better spacing */
-            text-align: center; /* Default alignment is center */
+            padding: 2px;
+            text-align: center;
             word-wrap: break-word;
             overflow: hidden;
-            max-width: 150px;  /* Limit maximum width for any column */
+            max-width: 2cm;  /* Limit maximum width for any column */
           }}
           th {{
             background-color: #f2f2f2;
             font-weight: bold;
           }}
-          .text-left {{
-            text-align: left;
-          }}
-          .text-right {{
-            text-align: right;
-          }}
-          h1 {{ font-size: 16px; text-align: center; margin: 6px 0; }}
-          h2 {{ font-size: 14px; text-align: center; margin: 5px 0; }}
-          h3 {{ font-size: 12px; text-align: center; margin: 4px 0; }}
+          h1 {{ font-size: 14px; text-align: center; margin: 6px 0; }}
+          h2 {{ font-size: 12px; text-align: center; margin: 5px 0; }}
+          h3 {{ font-size: 10px; text-align: center; margin: 4px 0; }}
           .er-low {{ color: red; font-weight: bold; }}
           .er-mid {{ color: orange; font-weight: bold; }}
           .er-high {{ color: green; font-weight: bold; }}
-          .logo-container {{ text-align: center; margin-bottom: 10px; }}
-          .forecast-table {{ margin-bottom: 20px; }}
-          .forecast-value {{ color: black; }}
-          .forecast-percentage {{ font-weight: bold; }}
-          .forecast-percentage-low {{ color: red; font-weight: bold; }}
-          .forecast-percentage-med {{ color: orange; font-weight: bold; }}
-          .forecast-percentage-high {{ color: green; font-weight: bold; }}
         </style>
       </head>
       <body>
         <div class="logo-container">
           <img src="data:image/png;base64,{config.encoded_logo}" style="height: 70px;">
         </div>
-        <h1>Monthly Invoice Report</h1>
-        <h2>{month_name} {year}- Week {week_of_month}</h2>
+        <h1>Monthly Project Report</h1>
+        <h2>{month_name} {year}</h2>
+        
+        <h3>...</h3>
     """
     
-    # Add the main table
+    # Add the first table
     if not df_all.empty:
+        # Apply conditional formatting for ER values in HTML
+        def format_er_cell(row):
+            if 'ER Invoiced' in row and row['ER Invoiced'] != 'N/A':
+                try:
+                    er_val = float(str(row['ER Invoiced']).replace('$', '').replace(',', ''))
+                    if er_val < 1:
+                        return f"<td class='er-low'>{row['ER Invoiced']}</td>"
+                    elif er_val <= 2.5:
+                        return f"<td class='er-mid'>{row['ER Invoiced']}</td>"
+                    else:
+                        return f"<td class='er-high'>{row['ER Invoiced']}</td>"
+                except:
+                    return f"<td>{row['ER Invoiced']}</td>"
+            return f"<td>{row.get('ER Invoiced', '')}</td>"
+        
         # Calculate column width percentage based on number of columns
-        columns = [c for c in table_columns if c['id'] != 'Original_Order' and c['id'] != 'Invoiced %_num']
+        columns = [c for c in table_columns if c['id'] != 'Original_Order']
         col_count = len(columns)
         
-        # Simple approach: evenly distribute widths
-        col_width_percent = 100 / col_count
-        col_widths = {col['id']: col_width_percent for col in columns}
+        # Calculate optimal column widths - more precise allocation
+        col_widths = {}
+        remaining_width = 100
+        allocated_columns = 0
         
-        # For key columns that need slight adjustments
-        # Just make minor adjustments rather than dramatic differences
-        col_widths['Project No'] = col_width_percent * 1.2  # Slightly wider
-        col_widths['Project Description'] = col_width_percent * 1.4  # Slightly wider
-        col_widths['Clients'] = col_width_percent * 1.2  # Slightly wider
-        col_widths['PM'] = col_width_percent * 0.6  # Slightly narrower
-        col_widths['TL'] = col_width_percent * 0.6  # Slightly narrower
-        col_widths['Type'] = col_width_percent * 0.6  # Slightly narrower
-        col_widths['Status'] = col_width_percent * 0.6  # Slightly narrower
-        col_widths['Service Line'] = col_width_percent * 0.6  # Slightly narrower
-        col_widths['Market Segment'] = col_width_percent * 0.6  # Slightly narrower
-        col_widths['SL'] = col_width_percent * 0.6  # Slightly narrower
-        col_widths['MS'] = col_width_percent * 0.6  # Slightly narrower
-        
-        # Custom HTML table with formatting
-        html_string += f"<h3>Monthly Invoice Report</h3>"
-        html_string += f"<table border='1' cellspacing='0' cellpadding='1' style='width: 90%; margin: 0 auto;'><thead><tr>"
+        # First, allocate fixed widths to specific columns
         for col in columns:
             col_id = col['id']
-            col_name = col['name'] if 'name' in col else col_id
-            width = col_widths.get(col_id, col_width_percent)
-            html_string += f"<th style='width: {width}%;'>{col_name}</th>"
+            if col_id == 'Project No':
+                col_widths[col_id] = 7  # Project numbers
+                remaining_width -= 7
+                allocated_columns += 1
+            elif col_id == 'Clients':
+                col_widths[col_id] = 12  # Client names
+                remaining_width -= 12
+                allocated_columns += 1
+            elif col_id == 'Status':
+                col_widths[col_id] = 10  # Status text
+                remaining_width -= 10
+                allocated_columns += 1
+            elif col_id == 'PM':
+                col_widths[col_id] = 4  # Project manager initials
+                remaining_width -= 4
+                allocated_columns += 1
+            elif col_id == 'TL':  # Add this block for TL field
+                col_widths[col_id] = 4  # Task Lead initials
+                remaining_width -= 4
+                allocated_columns += 1
+            elif col_id == 'Service Line':  # Add this
+                col_widths[col_id] = 8  # Service Line text
+                remaining_width -= 8
+                allocated_columns += 1
+            elif col_id == 'Market Segment':  # Add this
+                col_widths[col_id] = 8  # Market Segment text
+                remaining_width -= 8
+                allocated_columns += 1
+            elif col_id == 'Type':  # Add this
+                col_widths[col_id] = 6  # Type text
+                remaining_width -= 6
+                allocated_columns += 1
+            elif col_id in ['ER Contract', 'ER Invoiced']:
+                col_widths[col_id] = 4  # ER values
+                remaining_width -= 4
+                allocated_columns += 1
+                
+        # Distribute remaining width evenly among other columns
+        remaining_cols = col_count - allocated_columns
+        if remaining_cols > 0:
+            width_per_remaining = remaining_width / remaining_cols
+            for col in columns:
+                col_id = col['id']
+                if col_id not in col_widths:
+                    col_widths[col_id] = width_per_remaining
+        
+        # Custom HTML table with formatting
+        html_string += f"<table border='1' cellspacing='0' cellpadding='1'><thead><tr>"
+        for col in columns:
+            col_id = col['id']
+            width = col_widths.get(col_id, 100/col_count)
+            html_string += f"<th style='width:{width:.1f}%'>{col['name']}</th>"
         html_string += "</tr></thead><tbody>"
         
         for row in table_data:
             html_string += "<tr>"
             for col in columns:
                 col_id = col['id']
-                col_name = col['name'] if 'name' in col else col_id
-                value = row.get(col_id, '')
-                
-                # Determine text alignment based on column type
-                text_align_class = ''
-                # Left align text for descriptive fields
-                if col_id in ['Project No', 'Project Description', 'Clients']:
-                    text_align_class = 'class="text-left"'
-                # Right align text for monetary values
-                elif any(money_term in col_id for money_term in ['ER', 'Fee', 'Projected', 'Actual', 'Contract']):
-                    text_align_class = 'class="text-right"'
-                
-                # Apply conditional formatting for ER values
-                if col_id == 'ER DECON LLC' or col_id == 'DECON LLC Invoiced' or col_id == 'ER Invoiced':
-                    try:
-                        # Remove % and convert to float for comparison
-                        numeric_value = float(str(value).replace('%', '').replace('$', '').replace(',', ''))
-                        if numeric_value < 1:
-                            html_string += f"<td class='er-low text-right'>{value}</td>"
-                        elif numeric_value <= 2.5:
-                            html_string += f"<td class='er-mid text-right'>{value}</td>"
-                        else:
-                            html_string += f"<td class='er-high text-right'>{value}</td>"
-                    except:
-                        html_string += f"<td {text_align_class}>{value}</td>"
-                # Apply conditional formatting for Invoiced %
-                elif col_id == 'Invoiced %':
-                    try:
-                        # Try to extract percentage value
-                        if value == 'N/A':
-                            html_string += f"<td class='er-low'>{value}</td>"
-                        else:
-                            numeric_value = float(str(value).replace('%', ''))
-                            if numeric_value == 0:
-                                html_string += f"<td class='er-low'>{value}</td>"
-                            elif numeric_value < 60:
-                                html_string += f"<td style='color:darkorange;font-weight:bold;'>{value}</td>"
-                            elif numeric_value < 80:
-                                html_string += f"<td style='color:gold;font-weight:bold;'>{value}</td>"
-                            elif numeric_value < 90:
-                                html_string += f"<td style='color:yellowgreen;font-weight:bold;'>{value}</td>"
-                            else:
-                                html_string += f"<td class='er-high'>{value}</td>"
-                    except:
-                        html_string += f"<td>{value}</td>"
+                if col_id == 'ER Invoiced':
+                    html_string += format_er_cell(row)
                 else:
-                    html_string += f"<td {text_align_class}>{value}</td>"
+                    html_string += f"<td>{row.get(col_id, '')}</td>"
             html_string += "</tr>"
         html_string += "</tbody></table>"
+    else:
+        html_string += "<p>No project data available</p>"
     
-    # Add forecast summary table
-    if not df_forecast_summary.empty:
-        html_string += f"<h3>Forecast Summary</h3>"
-        html_string += f"<table border='1' cellspacing='0' cellpadding='1' class='forecast-table' style='width: 70%; margin: 20px auto;'><thead><tr>"
-        
-        for col in forecast_summary_columns:
-            col_name = col['name'] if 'name' in col else col['id']
-            html_string += f"<th>{col_name}</th>"
-        
-        html_string += "</tr></thead><tbody>"
-        
-        for row in forecast_summary_data:
-            html_string += "<tr>"
-            for col in forecast_summary_columns:
-                col_id = col['id']
-                value = row.get(col_id, '')
-                
-                # Determine text alignment based on column type
-                text_align_class = ''
-                # Right align text for monetary values
-                if col_id in ['Projected', 'Actual']:
-                    text_align_class = 'class="text-right"'
-                
-                # Apply conditional formatting for %Forecast vs Actual
-                if col_id == '%Forecast vs Actual':
-                    try:
-                        numeric_value = float(str(value).replace('%', ''))
-                        if numeric_value < 30:
-                            html_string += f"<td class='forecast-percentage-low'>{value}</td>"
-                        elif numeric_value < 75:
-                            html_string += f"<td class='forecast-percentage-med'>{value}</td>"
-                        else:
-                            html_string += f"<td class='forecast-percentage-high'>{value}</td>"
-                    except:
-                        html_string += f"<td>{value}</td>"
-                else:
-                    html_string += f"<td {text_align_class}>{value}</td>"
-            
-            html_string += "</tr>"
-        
-        html_string += "</tbody></table>"
-    
-    # Add forecast type table
-    if not df_forecast_type.empty:
-        html_string += f"<h3>Forecast by Type</h3>"
-        html_string += f"<table border='1' cellspacing='0' cellpadding='1' class='forecast-table' style='width: 80%; margin: 20px auto;'><thead><tr>"
-        
-        for col in forecast_type_columns:
-            col_name = col['name'] if 'name' in col else col['id']
-            html_string += f"<th>{col_name}</th>"
-        
-        html_string += "</tr></thead><tbody>"
-        
-        for row in forecast_type_data:
-            is_total_row = row.get('Type') == 'TOTAL'
-            html_string += f"<tr {'style=\"font-weight: bold;\"' if is_total_row else ''}>"
-            
-            for col in forecast_type_columns:
-                col_id = col['id']
-                value = row.get(col_id, '')
-                
-                # Determine text alignment based on column type
-                text_align_class = ''
-                # Left align Type column
-                if col_id == 'Type':
-                    text_align_class = 'class="text-left"'
-                # Right align text for monetary values
-                elif col_id in ['Projected', 'Actual']:
-                    text_align_class = 'class="text-right"'
-                
-                # Apply conditional formatting for Percentage column
-                if col_id == 'Percentage Projected vs Actual':
-                    try:
-                        numeric_value = float(str(value).replace('%', ''))
-                        style_class = ""
-                        
-                        # Fix for 100% value - this should be green, not red
-                        if numeric_value == 100:
-                            html_string += f"<td class='forecast-percentage-high'>{value}</td>"
-                        elif numeric_value < 30:
-                            html_string += f"<td class='forecast-percentage-low'>{value}</td>"
-                        elif numeric_value < 75:
-                            html_string += f"<td class='forecast-percentage-med'>{value}</td>"
-                        else:
-                            html_string += f"<td class='forecast-percentage-high'>{value}</td>"
-                    except:
-                        html_string += f"<td>{value}</td>"
-                else:
-                    html_string += f"<td {text_align_class}>{value}</td>"
-            
-            html_string += "</tr>"
-        
-        html_string += "</tbody></table>"
-
-    # Generate the bar chart for Projected vs Actual by project type
-    if not df_forecast_type.empty:
-        try:
-            import plotly.graph_objects as go
-            # Filter out the 'TOTAL' row for the chart
-            df_for_chart = df_forecast_type.copy()
-            df_for_chart = [row for row in df_for_chart if row.get('Type') != 'TOTAL']
-            
-            # Prepare data for the chart
-            project_types = [row.get('Type', '') for row in df_for_chart]
-            projected_values = []
-            actual_values = []
-            
-            for row in df_for_chart:
-                # Extract numeric values from currency strings
-                projected_str = row.get('Projected', '$0.00')
-                actual_str = row.get('Actual', '$0.00')
-                
-                # Convert the currency strings to float
-                projected_val = float(projected_str.replace('$', '').replace(',', ''))
-                actual_val = float(actual_str.replace('$', '').replace(',', ''))
-                
-                projected_values.append(projected_val)
-                actual_values.append(actual_val)
-            
-            # Create a grouped bar chart using plotly
-            fig = go.Figure()
-            
-            # Add bars for Projected
-            fig.add_trace(go.Bar(
-                x=project_types,
-                y=projected_values,
-                name='Projected',
-                marker_color='#4086F4'
-            ))
-            
-            # Add bars for Actual
-            fig.add_trace(go.Bar(
-                x=project_types,
-                y=actual_values,
-                name='Actual',
-                marker_color='#3EA045'
-            ))
-            
-            # Update layout
-            fig.update_layout(
-                title='Monthly Invoicing',
-                title_x=0.5,
-                xaxis=dict(
-                    title='Project Type',
-                    titlefont_size=12,
-                ),
-                yaxis=dict(
-                    title='Monthly Amount',
-                    titlefont_size=12,
-                    tickformat='$,.0f',
-                ),
-                barmode='group',
-                template='plotly_white',
-                height=500,
-                margin=dict(l=50, r=50, t=80, b=50),
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="right",
-                    x=0.99
-                )
-            )
-            
-            # Convert the figure to a PNG image
-            img_bytes = fig.to_image(format="png", scale=2.0)
-            
-            # Convert to base64 for embedding in HTML
-            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-            
-            # Add the chart to the HTML
-            html_string += f"""
-            <div style="text-align: center; margin: 30px 0;">
-                <h3>Projected vs Actual by Project Type</h3>
-                <img src="data:image/png;base64,{img_base64}" style="max-width: 90%; height: auto;">
-            </div>
-            """
-        except Exception as e:
-            print_red(f"Error generating chart: {str(e)}")
-            html_string += f"""
-            <div style="text-align: center; color: red; margin: 20px 0;">
-                Error generating chart: {str(e)}
-            </div>
-            """
-    
-    from datetime import datetime
-    current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html_string += f"""
-        <div class="footer">
-            Latest Data Update: {last_data_update} | Report Generated: {current_datetime}
-        </div>
-    </body>
+        <div class="footer">Latest Data Update: {last_data_update}</div>
+      
+      </body>
     </html>
     """
     
     # Generate PDF from HTML with specific options
-    # Update the PDF file name to include week number for better identification:
     try:
         # Using CSS @page settings for landscape orientation
         pdf_bytes = weasyprint.HTML(string=html_string).write_pdf()
-        return dcc.send_bytes(pdf_bytes, f"monthly_report_{month_name}_{year}_week_{week_of_month}.pdf")
+        return dcc.send_bytes(pdf_bytes, f"monthly_report_{month_name}_{year}.pdf")
     except Exception as e:
         print_red(f"Error generating PDF: {str(e)}")
         return dcc.send_string(f"Error generating PDF: {str(e)}", "error.pdf")
 # Fixing syntax and logical errors in the script
 @app.callback(
     [Output('weekly-report-table', 'data'),
-     Output('weekly-report-table', 'columns'),
-     Output('forecast-summary-table', 'data'),
-     Output('forecast-summary-table', 'columns'),
-     Output('forecast-type-table', 'data'),
-     Output('forecast-type-table', 'columns')],
+     Output('weekly-report-table', 'columns')],
     Input('report-week-picker', 'date')
 )
 
 def generate_monthly_report(selected_date):
     if not selected_date:
-        return [], [], [], [], [], []
+        return [], []
     
     # Call the function from data_processing
     project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
@@ -2213,211 +1900,288 @@ def generate_monthly_report(selected_date):
         project_log_path
     )
     if not report_data:
-        return [], [], [], [], [], []
+        return [], []
     
     # Define which columns to display (customize this list as needed)
     visible_columns = [
         'Project No', 
+        'Clients', 
+        'Status', 
         'PM', 
         'TL',
-        'Project Description',
-        'Clients', 
-        'Type', 
-        'Status', 
         'Service Line',     
         'Market Segment',  
+        'Type', 
+        #'Contracted Amount',
         'Projected',  
         'Actual',
+        #'Acummulative',
+        #'Monthly Invoice',
+        #'Total Invoice', 
+        #'Total Cost',
         'Invoiced %',
-        'DECON LLC Invoiced'
+        'ER Contract', 
+        'ER Invoiced'
     ]
     
-    # Filter columns to only show the ones we want, maintaining the specified order
-    display_columns = []
-    for col_id in visible_columns:
-        for col in all_columns:
-            if col['id'] == col_id:
-                display_columns.append(col)
-                break
-            
-    for col in display_columns:
-        if col['id'] == 'Service Line':
-            col['name'] = 'SL'
-        elif col['id'] == 'Market Segment':
-            col['name'] = 'MS'
-        elif col['id'] == 'ER DECON LLC':
-            col['name'] = 'ER Decon LLC'
-        elif col['id'] == 'Clients':
-            col['name'] = 'Client'
-        elif col['id'] == 'DECON LLC Invoiced':
-            col['name'] = 'ER DECON LLC'
-    
-    # Create a totals row
-    totals_row = {col: '' for col in visible_columns}  # Initialize with empty strings for all columns
-    totals_row['Project No'] = 'TOTAL:'
-    
-    # Helper function to extract numeric values from formatted strings
-    def extract_numeric(value):
-        if isinstance(value, str):
-            # Remove $, % and commas, then convert to float
-            cleaned = value.replace('$', '').replace(',', '').replace('%', '')
-            try:
-                return float(cleaned)
-            except:
-                return 0
-        return 0
-    
-    # Calculate totals for numeric columns
-    if report_data:
-        # Calculate sum for Projected column
-        if 'Projected' in visible_columns:
-            projected_sum = sum(extract_numeric(row.get('Projected', 0)) for row in report_data if 'TOTAL:' not in str(row.get('Project No', '')))
-            totals_row['Projected'] = f"${projected_sum:,.2f}" if projected_sum > 0 else "N/A"
-        
-        # Calculate sum for Actual column
-        if 'Actual' in visible_columns:
-            actual_sum = sum(extract_numeric(row.get('Actual', 0)) for row in report_data if 'TOTAL:' not in str(row.get('Project No', '')))
-            totals_row['Actual'] = f"${actual_sum:,.2f}" if actual_sum > 0 else "N/A"
-        
-    # Append the totals row
-    report_data.append(totals_row)
-    
-    # ------------------- CREATE FORECAST SUMMARY TABLE -------------------
-    # Get date information for getting the right forecast data
-    date_obj = pd.to_datetime(selected_date)
-    selected_month = date_obj.month
-    selected_year = date_obj.year
-    
-    # Load forecast data
-    forecast_df = load_forecast_invoicing()
-    
-    # Create forecast summary table data
-    forecast_summary_data = []
-    
-    if not forecast_df.empty:
-        # Filter for selected month
-        month_forecast = forecast_df[forecast_df['Month'] == selected_month]
-        if not month_forecast.empty:
-            forecast_value = month_forecast.iloc[0].get('ForecastValue', 0)
-            
-            # Get projected and actual totals
-            projected_sum = sum(extract_numeric(row.get('Projected', 0)) for row in report_data if 'TOTAL:' not in str(row.get('Project No', '')))
-            actual_sum = sum(extract_numeric(row.get('Actual', 0)) for row in report_data if 'TOTAL:' not in str(row.get('Project No', '')))
-            
-            # Calculate percentage of forecast vs actual
-            percent_forecast_actual = (actual_sum / forecast_value * 100) if forecast_value > 0 else 0
-            
-            # Add data row
-            forecast_summary_data.append({
-                'ForecastValue': f"${forecast_value:,.2f}" if forecast_value > 0 else "$0.00",
-                'Projected': f"${projected_sum:,.2f}" if projected_sum > 0 else "$0.00",
-                'Actual': f"${actual_sum:,.2f}" if actual_sum > 0 else "$0.00",
-                '%Forecast vs Actual': f"{percent_forecast_actual:.0f}%"
-            })
-    
-    # If no data, add empty row
-    if not forecast_summary_data:
-        forecast_summary_data.append({
-            'ForecastValue': "$0.00",
-            'Projected': "$0.00",
-            'Actual': "$0.00",
-            '%Forecast vs Actual': "0%"
-        })
-    
-    forecast_summary_columns = [
-        {'name': 'ForecastValue', 'id': 'ForecastValue'},
-        {'name': 'Projected', 'id': 'Projected'},
-        {'name': 'Actual', 'id': 'Actual'},
-        {'name': '%Forecast vs Actual', 'id': '%Forecast vs Actual'}
-    ]
-    
-    # ------------------- CREATE FORECAST BY TYPE TABLE -------------------
-    # Create forecast by type table data
-    forecast_type_data = []
-    
-    if report_data:
-        # Group the data by Type
-        type_groups = {}
-        for row in report_data:
-            if 'TOTAL:' in str(row.get('Project No', '')):
-                continue
-                
-            row_type = row.get('Type', 'Unknown')
-            projected = extract_numeric(row.get('Projected', 0))
-            actual = extract_numeric(row.get('Actual', 0))
-            
-            if row_type not in type_groups:
-                type_groups[row_type] = {'Projected': 0, 'Actual': 0}
-            
-            type_groups[row_type]['Projected'] += projected
-            type_groups[row_type]['Actual'] += actual
-        
-        # Create rows for each type
-        for type_name, values in type_groups.items():
-            projected = values['Projected']
-            actual = values['Actual']
-            percent = (actual / projected * 100) if projected > 0 else 0
-            
-            forecast_type_data.append({
-                'Type': type_name,
-                'Projected': f"${projected:,.2f}" if projected > 0 else "$0.00",
-                'Actual': f"${actual:,.2f}" if actual > 0 else "$0.00",
-                'Percentage Projected vs Actual': f"{percent:.0f}%"
-            })
-        
-        # Sort by type
-        forecast_type_data = sorted(forecast_type_data, key=lambda x: x['Type'])
-        
-        # Add TOTAL row
-        total_projected = sum(type_groups[t]['Projected'] for t in type_groups)
-        total_actual = sum(type_groups[t]['Actual'] for t in type_groups)
-        total_percent = (total_actual / total_projected * 100) if total_projected > 0 else 0
-        
-        forecast_type_data.append({
-            'Type': 'TOTAL',
-            'Projected': f"${total_projected:,.2f}" if total_projected > 0 else "$0.00",
-            'Actual': f"${total_actual:,.2f}" if total_actual > 0 else "$0.00",
-            'Percentage Projected vs Actual': f"{total_percent:.0f}%"
-        })
-    
-    # If no data, add empty row with totals
-    if not forecast_type_data:
-        forecast_type_data = [
-            {'Type': '0-Pay App (LS)', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'},
-            {'Type': '1-Pay App (TM)', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'},
-            {'Type': '2-Organic', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'},
-            {'Type': '3-Large', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'},
-            {'Type': 'TOTAL', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'}
-        ]
-    
-    forecast_type_columns = [
-        {'name': 'Type', 'id': 'Type'},
-        {'name': 'Projected', 'id': 'Projected'},
-        {'name': 'Actual', 'id': 'Actual'},
-        {'name': 'Percentage Projected vs Actual', 'id': 'Percentage Projected vs Actual'}
-    ]
+    # Filter columns to only show the ones we want
+    display_columns = [col for col in all_columns if col['id'] in visible_columns]
     
     # The data still has all fields, but we're only showing selected columns
-    return report_data, display_columns, forecast_summary_data, forecast_summary_columns, forecast_type_data, forecast_type_columns
+    return report_data, display_columns
 
 
-def load_forecast_invoicing():
-    """Load forecast invoicing data from pickle file or generate it on the fly"""
-    try:
-        pickle_path = os.path.join(PICKLE_OUTPUT_DIR, "forecast_invoicing.pkl")
-        if os.path.exists(pickle_path):
-            df_forecast = pd.read_pickle(pickle_path)
-            print_green(f"Successfully loaded forecast invoicing data with {len(df_forecast)} rows")
-            return df_forecast
-        else:
-            print_orange("Forecast invoicing pickle file not found.")
-            # Try to generate it on the fly
-            from data_processing import import_forecast_invoicing
-            df_forecast = import_forecast_invoicing()
-            return df_forecast
+
+"""
+def generate_monthly_report(selected_date):
+        if not selected_date:
+            return [], []
+
+        # Get month and year from selected date
+        date_obj = pd.to_datetime(selected_date)
+        selected_month = date_obj.month
+        selected_year = date_obj.year
+
+        # Check if year is supported (2023, 2024, or 2025)
+        if selected_year not in [2023, 2024, 2025]:
+            print_red(f"Reports are only available for years 2023-2025. Selected year: {selected_year}")
+            return [], []
+
+        print_green(f"==================== GENERATING REPORT ====================")
+        print_green(f"Generating report for {date_obj.strftime('%B %Y')}")
+        print_green(f"Selected month: {selected_month}, year: {selected_year}")
+
+        # Load data from the correct sheet based on the selected year
+        sheet_name = f"5_Invoice-{selected_year}"
+
+        try:
+            # Read the selected sheet from the project log
+            df_sheet = pd.read_excel(project_log_path, sheet_name=sheet_name)
+            print_green(f"Successfully loaded sheet {sheet_name} from project log")
+            print_green(f"Sheet columns: {df_sheet.columns.tolist()}")
+
+            # Add a column to preserve the original order
+            df_sheet['Original_Order'] = range(len(df_sheet))
+
+            # Check if column A exists and contains month values
+            if 'Month' not in df_sheet.columns and df_sheet.columns[0] != 'Month':
+                # If column not named 'Month', rename the first column
+                first_col_name = df_sheet.columns[0]
+                df_sheet.rename(columns={first_col_name: 'Month'}, inplace=True)
+                print_green(f"Renamed first column from '{first_col_name}' to 'Month'")
+
+            # Filter rows where Month column matches the selected month
+            df_month = df_sheet[pd.to_numeric(df_sheet['Month'], errors='coerce') == selected_month]
+            print_green(f"Found {len(df_month)} projects for month {selected_month} in year {selected_year}")
+
+            # Debugging: Print the filtered DataFrame for the month
+            print_green("Filtered DataFrame for the month:")
+            print_cyan(df_month.head())
+
+            # Validate the DataFrame before processing
+            if df_month.empty:
+                print_red(f"Error: No data found for month {selected_month} in sheet {sheet_name}")
+                return [], []
+
+            # Extract project numbers from the filtered sheet
+            project_column = 'Project No' if 'Project No' in df_month.columns else 'Project No.'
+            if project_column not in df_month.columns:
+                # Look for any column that might contain project numbers
+                for col in df_month.columns:
+                    if 'project' in col.lower():
+                        project_column = col
+                        break
+
+            if project_column not in df_month.columns:
+                print_red(f"No project number column found in sheet {sheet_name}")
+                print_cyan(f"Available columns: {df_month.columns.tolist()}")
+                return [], []
+
+            # Get project numbers from the sheet
+            projects_in_month = df_month[project_column].dropna().unique().tolist()
+            projects_in_month = [standardize_project_no(str(p)) for p in projects_in_month if str(p).strip().upper() != 'TOTAL']
+            
+            # Debugging: Print the project numbers being processed
+            print_green("Project numbers being processed:")
+            print_cyan(projects_in_month)
+
+            # Now build the report with these projects
+            active_project_details = []
+
+            for project_no in projects_in_month:
+                # Skip 'TOTAL' rows
+                if str(project_no).strip().upper() == 'TOTAL':
+                    continue
+
+                # Debugging: Print the current project number
+                print_green(f"Processing project: {project_no}")
+
+                # Find this project in the projects dataframe
+                project_df = global_projects_df[global_projects_df['Project No'].apply(
+                    lambda x: standardize_project_no(str(x)) == project_no
+                )]
+
+                if project_df.empty:
+                    print_red(f"Project {project_no} not found in projects database!")
+                    continue
+
+                # Debugging: Print the project DataFrame
+                print_cyan("Project DataFrame:")
+                print_cyan(project_df.head())
+
+                project_row = project_df.iloc[0]
+
+                # Get all invoices for this project (for ER calculation)
+                project_invoices = global_raw_invoices[global_raw_invoices['Project No'].apply(
+                    lambda x: standardize_project_no(str(x)) == project_no
+                )]
+
+                if project_invoices.empty:
+                    print_red(f"No invoices found for project {project_no}")
+                    # Continue with default values for invoice-related fields
+                    monthly_invoice = 0
+                    total_invoice = 0
+                else:
+                    # Debugging: Print the invoices DataFrame
+                    print_cyan("Invoices DataFrame:")
+                    print_cyan(project_invoices.head())
+
+                    # Convert 'Actual' column to numeric before summing
+                    project_invoices['Actual'] = pd.to_numeric(project_invoices['Actual'], errors='coerce')
+
+                    # Get monthly invoice amount from the sheet
+                    monthly_invoice_col = 'Actual' if 'Actual' in df_month.columns else None
+                    if monthly_invoice_col:
+                        monthly_invoice = df_month.loc[
+                            df_month[project_column].apply(lambda x: standardize_project_no(str(x)) == project_no),
+                            monthly_invoice_col
+                        ].sum()
+                    else:
+                        monthly_invoice = 0
+
+                    # Get total invoice amount (cumulative)
+                    total_invoice = project_invoices['Actual'].sum()
+
+                # Get total cost from timesheet data
+                project_costs = global_merged_df[global_merged_df['Project No'] == project_no]
+                total_cost = project_costs['day_cost'].sum() if not project_costs.empty else 0
+
+                # Parse contracted amount
+                contracted_amount = project_row.get('Contracted Amount', None)
+                if isinstance(contracted_amount, str):
+                    try:
+                        contracted_amount = float(contracted_amount.replace('$', '').replace(',', ''))
+                    except:
+                        contracted_amount = None
+
+                # Calculate ER values
+                er_contract = contracted_amount / total_cost if total_cost > 0 and contracted_amount else None
+                er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice else None
+
+                # Get Projected, Actual, and Acummulative from the sheet for this project
+                project_month_data = df_month[df_month[project_column].apply(
+                    lambda x: standardize_project_no(str(x)) == project_no
+                )]
+                
+                # Extract Projected, Actual, and Acummulative values
+                projected_value = None
+                actual_value = None
+                acummulative_value = None
+                
+                if not project_month_data.empty:
+                    if 'Projected' in project_month_data.columns:
+                        projected_value = project_month_data['Projected'].iloc[0]
+                        if isinstance(projected_value, str):
+                            projected_value = projected_value.replace('$', '').replace(',', '')
+                        try:
+                            projected_value = float(projected_value) if pd.notnull(projected_value) else None
+                        except:
+                            projected_value = None
+                    
+                    if 'Actual' in project_month_data.columns:
+                        actual_value = project_month_data['Actual'].iloc[0]
+                        if isinstance(actual_value, str):
+                            actual_value = actual_value.replace('$', '').replace(',', '')
+                        try:
+                            actual_value = float(actual_value) if pd.notnull(actual_value) else None
+                        except:
+                            actual_value = None
+                    
+                    # Handle different spellings of "Acummulative"/"Accumulative"
+                    acum_col = None
+                    for col in project_month_data.columns:
+                        if 'acum' in col.lower() or 'accum' in col.lower():
+                            acum_col = col
+                            break
+                    
+                    if acum_col:
+                        acummulative_value = project_month_data[acum_col].iloc[0]
+                        if isinstance(acummulative_value, str):
+                            acummulative_value = acummulative_value.replace('$', '').replace(',', '')
+                        try:
+                            acummulative_value = float(acummulative_value) if pd.notnull(acummulative_value) else None
+                        except:
+                            acummulative_value = None
+
+                # Build the project record for the table
+                project_record = {
+                    'Project No': project_no,
+                    'Clients': project_row.get('Clients', 'Unknown'),
+                    'Status': project_row.get('Status', 'Unknown'),
+                    'PM': project_row.get('PM', 'Unknown'),
+                    'Contracted Amount': f"${contracted_amount:,.2f}" if contracted_amount else "N/A",
+                    'Projected': f"${projected_value:,.2f}" if projected_value else "N/A",
+                    'Actual': f"${actual_value:,.2f}" if actual_value else "N/A",
+                    'Acummulative': f"${acummulative_value:,.2f}" if acummulative_value else "N/A",
+                    'Monthly Invoice': f"${monthly_invoice:,.2f}" if monthly_invoice else "N/A",
+                    'Total Invoice': f"${total_invoice:,.2f}" if total_invoice else "N/A",
+                    'Total Cost': f"${total_cost:,.2f}" if total_cost else "N/A",
+                    'ER Contract': f"{er_contract:.2f}" if er_contract else "N/A",
+                    'ER Invoiced': f"{er_invoiced:.2f}" if er_invoiced else "N/A"
+                }
+
+                # Add Original_Order for sorting if available
+                original_order_values = df_month.loc[
+                    df_month[project_column].apply(lambda x: standardize_project_no(str(x)) == project_no), 
+                    'Original_Order'
+                ]
+                if not original_order_values.empty:
+                    project_record['Original_Order'] = original_order_values.values[0]
+                else:
+                    project_record['Original_Order'] = 999  # Default high value for sorting
+
+                active_project_details.append(project_record)
+
+            # If no valid projects found, return empty data
+            if not active_project_details:
+                print_red(f"No valid projects found in month {selected_month} of year {selected_year}!")
+                return [], []
+
+            # Sort the projects by the original order
+            active_project_details = sorted(active_project_details, key=lambda x: x.get('Original_Order', 999))
+
+            # Create columns for the table
+            columns = [{'name': col, 'id': col} for col in active_project_details[0].keys() if col != 'Original_Order']
+
+            # Remove Original_Order from the final data
+            for record in active_project_details:
+                if 'Original_Order' in record:
+                    del record['Original_Order']
+
+            print_green(f"Final report contains {len(active_project_details)} projects")
+            print_green(f"==================== END OF REPORT GENERATION ====================")
+
+            return active_project_details, columns
+            
+    
+
     except Exception as e:
-        print_red(f"Error loading forecast invoicing data: {str(e)}")
-        return pd.DataFrame(columns=['Month', 'MonthName', 'Year', 'ForecastValue'])
+        import traceback
+        print_red(f"Error loading project data: {str(e)}")
+        print_red(traceback.format_exc())
+        return [], []
+#################################################################################################################
+    """
 
 def main():
     """Main script to load and process project data for 2023, 2024, and 2025."""
@@ -2449,6 +2213,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #app.run_server(debug=True, host='10.1.2.189', port=8050, use_reloader=False) 
-    #app.run(debug=True, host='localhost', port=7050, use_reloader=False)  
-    app.run(debug=True, host='0.0.0.0', port=7050, use_reloader=False)
+    app.run(debug=True, host='10.1.2.149', port=7050, use_reloader=False)   # print(">>> main() returned. Now starting server.")
