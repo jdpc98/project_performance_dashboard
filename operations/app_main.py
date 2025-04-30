@@ -560,7 +560,10 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                     ]
                 )
             ], style={'padding': '20px'}),
-            
+            html.Div([
+                html.H2("Projected vs Actual by Project Type", style={'textAlign':'center'}),
+                dcc.Graph(id='report-bar-chart')      # <-- placeholder
+            ], style={'padding':'20px'}),
             # Export button
             html.Div([
                 html.Button("Export to PDF", id="export-weekly-report", n_clicks=0),
@@ -704,6 +707,55 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
 #test for report export to pdf files 
 
 # Callback to update the date display
+
+
+
+
+@app.callback(
+    Output('report-bar-chart','figure'),
+    Input('report-week-picker','date')
+)
+def update_report_bar_chart(selected_date):
+    import plotly.graph_objects as go
+    import pandas as pd
+
+    # 1) regenerate your report_data from your data_processing function
+    report_data, all_cols = data_processing.generate_monthly_report_data(
+        selected_date,
+        global_projects_df,
+        global_merged_df,
+        global_raw_invoices,
+        project_log_path
+    )
+    df = pd.DataFrame(report_data)
+    # drop the TOTAL row if you included it in report_data
+    df = df[df['Type'] != 'TOTAL']
+
+    # 2) parse currency strings into floats
+    def to_num(x):
+        return float(str(x).replace('$','').replace(',','')) if isinstance(x, str) else float(x)
+
+    types   = df['Type'].tolist()
+    projected = df['Projected'].map(to_num).tolist()
+    actual    = df['Actual'].map(to_num).tolist()
+
+    # 3) build the grouped bar chart
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=types, y=projected, name='Projected'))
+    fig.add_trace(go.Bar(x=types, y=actual,    name='Actual'))
+    fig.update_layout(
+        barmode='group',
+        title='Projected vs Actual by Project Type',
+        title_x=0.5,
+        xaxis_title='Project Type',
+        yaxis_title='Amount (USD)',
+        yaxis_tickprefix='$'
+    )
+    return fig
+
+
+
+
 @app.callback(
     Output('selected-week-display', 'children'),
     Input('report-week-picker', 'date')
