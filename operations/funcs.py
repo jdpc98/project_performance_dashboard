@@ -16,12 +16,13 @@ import base64
 
 import data_processing
 import config
-from data_processing import extract_project_no, print_green
+from print_utils import print_green, print_cyan, print_orange, print_red
+from data_processing import extract_project_no
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
 
 # Load the logo image
-with open(r"C:\Users\jose.pineda\Desktop\operations\logodecon2.jpg", "rb") as image_file:
-    encoded_logo = base64.b64encode(open(r"C:\Users\jose.pineda\Desktop\operations\logodecon2.jpg", "rb").read()).decode()
+with open(r"C:\Users\jose.pineda\Desktop\smart_decon\operations\logodecon2.jpg", "rb") as image_file:
+    encoded_logo = base64.b64encode(open(r"C:\Users\jose.pineda\Desktop\smart_decon\operations\logodecon2.jpg", "rb").read()).decode()
 
 # Load the data directly from Excel for the most up-to-date information
 print(f"Loading data from direct Excel processing...")
@@ -42,7 +43,7 @@ except Exception as e:
     print("Falling back to pickle files...")
     
     # Define pickle paths
-    PICKLE_DIR = r"C:\Users\jose.pineda\Desktop\operations\pickles"
+    PICKLE_DIR = r"C:\Users\jose.pineda\Desktop\smart_decon\operations\pickles"
     
     # Load the data from pickles
     with open(os.path.join(PICKLE_DIR, "global_merged_df.pkl"), 'rb') as f:
@@ -243,7 +244,7 @@ def register_callbacks(app):
         if not selected_jobcode:
             default_fig = px.pie(title="No data available")
             return default_fig, default_fig
-        df_filtered = global_merged_df[global_merged_df['jobcode_2'] == selected_jobcode].copy()
+        df_filtered = global_merged_df[global_merged_df['Project No'] == selected_jobcode].copy()
         if selected_years:
             try:
                 selected_years_int = [int(y) for y in selected_years]
@@ -283,30 +284,73 @@ def register_callbacks(app):
     # ------------------------------------------------------------
     # Callback: Time Distribution by Employee Pie Chart
     @app.callback(
-        Output('pie-chart', 'figure'),
-        [Input('jobcode-dropdown', 'value'),
-         Input('year-dropdown', 'value')]
-    )
+    Output('pie-chart', 'figure'),
+    [Input('jobcode-dropdown', 'value'),
+     Input('year-dropdown', 'value')]
+)
     def update_pie_chart(selected_jobcode, selected_years):
+        import plotly.express as px
+        import plotly.graph_objects as go
+        
+        print(f"Selected jobcode: {selected_jobcode}")
+        print(f"Selected years: {selected_years}")
+        
+        # Try both filtering methods until one works
         df_filtered = global_merged_df[global_merged_df['jobcode_2'] == selected_jobcode].copy()
+        
+        if df_filtered.empty:
+            # If first filter didn't work, try with Project No (extracted from jobcode)
+            project_no = extract_project_no(selected_jobcode)
+            df_filtered = global_merged_df[global_merged_df['Project No'] == project_no].copy()
+            print(f"Retrying with Project No: {project_no}, found {len(df_filtered)} rows")
+        
+        print(f"Filtered DataFrame after jobcode filter: {df_filtered.shape}")
+        
+        # Print columns to help with debugging
+        if not df_filtered.empty:
+            print("Columns in df_filtered:")
+            print(df_filtered.columns.tolist())
+            print(df_filtered[['Project No', 'local_date', 'Service Item', 'day_cost', 'hours']].head(30))
+        
+        # Apply year filter if provided
         if selected_years:
             selected_years_int = [int(y) for y in selected_years]
             df_filtered = df_filtered[df_filtered['local_date'].dt.year.isin(selected_years_int)]
-        if set(selected_years) == {"2024"}:
-            value_col = 'total_hours_24'
-        elif set(selected_years) == {"2025"}:
-            value_col = 'total_hours_25'
+            print(f"Filtered DataFrame after year filter: {df_filtered.shape}")
+        
+        # If the DataFrame is empty after filtering, return empty figure
+        if df_filtered.empty:
+            return go.Figure(layout=dict(title="No data available"))
+        
+        # Check if column exists before using
+        if 'hours' in df_filtered.columns:
+            value_col = 'hours'  # Default to using the hours column
         else:
-            df_filtered['combined_total_hours'] = df_filtered['total_hours_24'].fillna(0) + df_filtered['total_hours_25'].fillna(0)
-            value_col = 'combined_total_hours'
-        grouped = df_filtered.groupby('Employee', as_index=False)[value_col].sum()
+            print("No hours column found!")
+            return go.Figure(layout=dict(title="Missing hours column"))
+        
+        # Group by employee
+        employee_col = 'Employee'
+        if employee_col not in df_filtered.columns:
+            for col in ['Personel', 'full_name', 'fname']:
+                if col in df_filtered.columns:
+                    employee_col = col
+                    break
+        
+        if employee_col not in df_filtered.columns:
+            return go.Figure(layout=dict(title="No employee column found"))
+        
+        # Group and create chart
+        grouped = df_filtered.groupby(employee_col, as_index=False)[value_col].sum()
         total_hours = grouped[value_col].sum()
+        
         fig = px.pie(
             grouped,
-            names='Employee',
+            names=employee_col,
             values=value_col,
-            title=f"Percentage of Hours by Employee for Jobcode: {extract_project_no(selected_jobcode)}<br><b>Total Hours:</b> {total_hours:.2f}"
+            title=f"Percentage of Hours by Employee for {selected_jobcode}<br>Total Hours: {total_hours:.2f}"
         )
+        
         fig.update_traces(hovertemplate='<b>%{label}</b><br>Hours: %{value:.2f}<extra></extra>')
         fig.update_layout(title={'x': 0.5}, legend=dict(orientation="v", x=1.1, y=0.5, xanchor="left", yanchor="middle"))
         return fig
@@ -319,12 +363,18 @@ def register_callbacks(app):
          Input('year-dropdown', 'value')]
     )
     def update_cost_pie_chart(selected_jobcode, selected_years):
+        print(f"Selected jobcode: {selected_jobcode}")
+        print(f"Selected years: {selected_years}")
         df_filtered = global_merged_df[global_merged_df['jobcode_2'] == selected_jobcode].copy()
+        print(f"Filtered DataFrame after jobcode filter: {df_filtered.shape}")
         if selected_years:
             selected_years_int = [int(y) for y in selected_years]
             df_filtered = df_filtered[df_filtered['local_date'].dt.year.isin(selected_years_int)]
+            print(f"Filtered DataFrame after year filter: {df_filtered.shape}")
         grouped = df_filtered.groupby('Employee', as_index=False)['day_cost'].sum()
+        print(f"Grouped data: {grouped}")
         total_cost = grouped['day_cost'].sum()
+        print(f"Total cost: {total_cost}")
         fig = px.pie(
             grouped,
             names='Employee',
