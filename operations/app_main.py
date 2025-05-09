@@ -1819,7 +1819,8 @@ def update_award_date(selected_jobcode):
     [Output('project-table-left', 'data'),
      Output('project-table-left', 'columns'),
      Output('project-table-right', 'data'),
-     Output('project-table-right', 'columns')],
+     Output('project-table-right', 'columns'),
+     Output('project-table-right', 'style_data_conditional')],
     [Input('jobcode-dropdown', 'value')]
 )
 def update_project_tables(selected_jobcode):
@@ -1828,7 +1829,7 @@ def update_project_tables(selected_jobcode):
             {"name": "Field", "id": "Field"}, 
             {"name": "Value", "id": "Value"},
             {"name": "Value_num", "id": "Value_num", "type": "numeric"}#, "hidden": True}
-        ]
+        ], []
 
     print(f"Selected jobcode: {selected_jobcode}")
     
@@ -1882,8 +1883,8 @@ def update_project_tables(selected_jobcode):
             {"name": "Value_num", "id": "Value_num", "type": "numeric", "hidden": True}
         ]
         
-        return left_data, left_columns, right_table_data, right_columns
-    
+        return left_data, left_columns, right_table_data, right_columns, []
+
     # We found a match, proceed with creating the tables
     project_record = filtered.iloc[0]
     print(f"Found project: {project_record['Project No']}")
@@ -1931,6 +1932,16 @@ def update_project_tables(selected_jobcode):
     er_contract = contracted_amount / total_cost if total_cost > 0 and contracted_amount is not None else None
     er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice > 0 else None
     
+    # Calculate type 1 (DECON LLC) and type 2 costs
+    type1_cost = df_filtered[df_filtered['staff_type'] == 1]['day_cost'].sum()
+    type2_cost = df_filtered[df_filtered['staff_type'] == 2]['day_cost'].sum()
+    
+    # Calculate DECON LLC ER
+    if type1_cost > 0:
+        decon_llc_er = (total_invoice - type2_cost) / type1_cost
+    else:
+        decon_llc_er = None
+
     # Format values
     format_money = lambda x: f"${x:,.2f}" if x is not None else "N/A"
     format_er = lambda x: f"{x:.2f}" if x is not None else "N/A"
@@ -1942,7 +1953,8 @@ def update_project_tables(selected_jobcode):
         {"Field": "Total Cost", "Value": format_money(total_cost), "Value_num": total_cost},
         {"Field": "Remaining to Invoice", "Value": format_money(remaining_to_invoice), "Value_num": remaining_to_invoice or 0},
         {"Field": "ER Contract", "Value": format_er(er_contract), "Value_num": er_contract or 0},
-        {"Field": "ER Invoiced", "Value": format_er(er_invoiced), "Value_num": er_invoiced or 0}
+        {"Field": "ER Invoiced", "Value": format_er(er_invoiced), "Value_num": er_invoiced or 0},
+        {"Field": "DECON LLC ER", "Value": format_er(decon_llc_er), "Value_num": decon_llc_er or 0}
     ]
     
     # Define columns
@@ -1952,8 +1964,87 @@ def update_project_tables(selected_jobcode):
         {"name": "Value", "id": "Value"},
         {"name": "Value_num", "id": "Value_num", "type": "numeric"}#, "hidden": True}
     ]
+
+    # Add conditional styling for ER values only
+    style_data_conditional = [
+        # ER Contract styling
+        {
+            'if': {
+                'filter_query': '{Field} = "ER Contract" && {Value_num} < 1',
+                'column_id': 'Value'
+            },
+            'color': 'red',
+            'fontWeight': 'bold'
+        },
+        {
+            'if': {
+                'filter_query': '{Field} = "ER Contract" && {Value_num} >= 1 && {Value_num} <= 2.5',
+                'column_id': 'Value'
+            },
+            'color': 'orange',
+            'fontWeight': 'bold'
+        },
+        {
+            'if': {
+                'filter_query': '{Field} = "ER Contract" && {Value_num} > 2.5',
+                'column_id': 'Value'
+            },
+            'color': 'green',
+            'fontWeight': 'bold'
+        },
+        # ER Invoiced styling
+        {
+            'if': {
+                'filter_query': '{Field} = "ER Invoiced" && {Value_num} < 1',
+                'column_id': 'Value'
+            },
+            'color': 'red',
+            'fontWeight': 'bold'
+        },
+        {
+            'if': {
+                'filter_query': '{Field} = "ER Invoiced" && {Value_num} >= 1 && {Value_num} <= 2.5',
+                'column_id': 'Value'
+            },
+            'color': 'orange',
+            'fontWeight': 'bold'
+        },
+        {
+            'if': {
+                'filter_query': '{Field} = "ER Invoiced" && {Value_num} > 2.5',
+                'column_id': 'Value'
+            },
+            'color': 'green',
+            'fontWeight': 'bold'
+        },
+        # DECON LLC ER styling
+        {
+            'if': {
+                'filter_query': '{Field} = "DECON LLC ER" && {Value_num} < 1',
+                'column_id': 'Value'
+            },
+            'color': 'red',
+            'fontWeight': 'bold'
+        },
+        {
+            'if': {
+                'filter_query': '{Field} = "DECON LLC ER" && {Value_num} >= 1 && {Value_num} <= 2.5',
+                'column_id': 'Value'
+            },
+            'color': 'orange',
+            'fontWeight': 'bold'
+        },
+        {
+            'if': {
+                'filter_query': '{Field} = "DECON LLC ER" && {Value_num} > 2.5',
+                'column_id': 'Value'
+            },
+            'color': 'green',
+            'fontWeight': 'bold'
+        }
+    ]
     
-    return left_data, left_columns, right_table_data, right_columns
+    return left_data, left_columns, right_table_data, right_columns, style_data_conditional
 
 
 
@@ -2828,5 +2919,3 @@ if __name__ == "__main__":
     print(global_merged_df[['Project No', 'jobcode_2', 'hours', 'Employee', 'Personel']].head(5))#app.run(debug=True, host='localhost', port=7050, use_reloader=False)  
     app.run(debug=True, host='0.0.0.0', port=7050, use_reloader=False)
 
-# Callback for Time Distribution By Employee Pie Chart
-# Callback for Time Distribution By Employee Pie Chart
