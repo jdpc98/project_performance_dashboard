@@ -1,0 +1,28 @@
+# File: /dash-sqlite-cache/dash-sqlite-cache/src/components/callbacks.py
+
+from dash import Input, Output, State, callback
+from src.data_manager import load_data
+from src.database.cache import get_cached_data
+
+@callback(
+    Output('output-component', 'children'),
+    Input('input-component', 'value'),
+    State('state-component', 'value')
+)
+def update_output(input_value, state_value):
+    """Update output based on input and state values."""
+    if input_value:
+        data = load_data(input_value)  # Load data based on input
+        return f"Data loaded: {data}"
+    return "No input provided."
+
+@callback(
+    Output('cache-output', 'children'),
+    Input('cache-button', 'n_clicks')
+)
+def update_cache(n_clicks):
+    """Update cache when button is clicked."""
+    if n_clicks:
+        cached_data = get_cached_data()  # Retrieve cached data
+        return f"Cached data: {cached_data}"
+    return "Cache not updated."

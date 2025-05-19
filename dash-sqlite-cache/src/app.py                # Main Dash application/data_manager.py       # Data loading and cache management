@@ -1,0 +1,24 @@
+from dash import Dash, html
+from dash.dependencies import Input, Output
+from data_manager import load_data
+
+app = Dash(__name__)
+
+app.layout = html.Div([
+    html.H1("Dash SQLite Cache Example"),
+    html.Div(id='data-output'),
+    html.Button('Load Data', id='load-button', n_clicks=0)
+])
+
+@app.callback(
+    Output('data-output', 'children'),
+    Input('load-button', 'n_clicks')
+)
+def update_output(n_clicks):
+    if n_clicks > 0:
+        data = load_data()
+        return f"Data Loaded: {data}"
+    return "Click the button to load data."
+
+if __name__ == '__main__':
+    app.run_server(debug=True)

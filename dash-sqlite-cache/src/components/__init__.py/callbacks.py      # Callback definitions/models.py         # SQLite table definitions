@@ -1,0 +1,28 @@
+# src/components/callbacks.py
+
+from dash import Input, Output, State, callback
+from src.data_manager import load_data
+from src.database.cache import get_cached_data
+
+@callback(
+    Output('output-component', 'children'),
+    Input('input-component', 'value'),
+    State('input-state', 'value')
+)
+def update_output(input_value, state_value):
+    """Update output based on input value and state."""
+    if input_value:
+        data = load_data(input_value)
+        return f"Data loaded: {data}"
+    return "No input provided."
+
+@callback(
+    Output('cached-output', 'children'),
+    Input('cache-button', 'n_clicks')
+)
+def update_cache_output(n_clicks):
+    """Fetch data from cache when button is clicked."""
+    if n_clicks:
+        cached_data = get_cached_data()
+        return f"Cached data: {cached_data}"
+    return "Click to load cached data."

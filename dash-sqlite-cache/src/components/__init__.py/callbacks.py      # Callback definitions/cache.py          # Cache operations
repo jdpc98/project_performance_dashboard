@@ -1,0 +1,39 @@
+# File: /dash-sqlite-cache/dash-sqlite-cache/src/components/callbacks.py
+
+from dash import Input, Output, State, callback
+from dash.exceptions import PreventUpdate
+from src.database.cache import read_cache, write_cache
+
+@callback(
+    Output('output-component', 'children'),
+    Input('input-component', 'value'),
+    State('input-component', 'id')
+)
+def update_output(input_value, input_id):
+    if not input_value:
+        raise PreventUpdate
+
+    # Perform some operation based on the input value
+    result = f"You entered: {input_value}"
+
+    # Optionally cache the result
+    write_cache(input_id, result)
+
+    return result
+
+@callback(
+    Output('cached-output', 'children'),
+    Input('cache-button', 'n_clicks'),
+    State('input-component', 'id')
+)
+def display_cached_output(n_clicks, input_id):
+    if n_clicks is None:
+        raise PreventUpdate
+
+    # Read from cache
+    cached_result = read_cache(input_id)
+
+    if cached_result:
+        return f"Cached result: {cached_result}"
+    else:
+        return "No cached result found."

@@ -1,0 +1,6 @@
+Flask
+dash
+pandas
+sqlalchemy
+pytest
+dash-bootstrap-components

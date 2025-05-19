@@ -1,0 +1,24 @@
+from dash import dcc, html, Input, Output
+from src.data_manager import load_data
+from src.database.cache import get_cached_data, update_cache
+
+# Callback to update the data displayed in the Dash application
+def register_callbacks(app):
+    @app.callback(
+        Output('data-display', 'children'),
+        Input('refresh-button', 'n_clicks')
+    )
+    def update_data(n_clicks):
+        # Load data from the SQLite database or cache
+        data = get_cached_data() if n_clicks is None else load_data()
+        return html.Div([html.P(f"Data: {item}") for item in data])
+
+    @app.callback(
+        Output('cache-status', 'children'),
+        Input('update-cache-button', 'n_clicks')
+    )
+    def update_cache_status(n_clicks):
+        if n_clicks:
+            update_cache()
+            return "Cache updated successfully."
+        return "Click the button to update the cache."

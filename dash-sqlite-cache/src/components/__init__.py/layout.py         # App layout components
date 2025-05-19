@@ -1,0 +1,18 @@
+from dash import Dash, html, dcc
+
+def create_layout():
+    layout = html.Div([
+        html.H1("Dash SQLite Cache Application"),
+        dcc.Dropdown(
+            id='data-dropdown',
+            options=[
+                {'label': 'Option 1', 'value': 'option1'},
+                {'label': 'Option 2', 'value': 'option2'},
+            ],
+            value='option1'
+        ),
+        html.Div(id='output-container')
+    ])
+    return layout
+
+layout = create_layout()
