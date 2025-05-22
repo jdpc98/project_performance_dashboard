@@ -1,5 +1,12 @@
-# data_processing.py
-
+#data_processing.py
+# clean version 22/may/2025
+# ######################################################################
+#validated
+########################################################################
+##Import libraries and locally defined functions
+from utility_funcs import print_green, print_cyan, print_orange, print_red, print_orange, standardize_project_no, sanitize_filename, extract_project_no
+from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
+########################################################################
 import os
 import re
 import base64
@@ -8,14 +15,336 @@ import pandas as pd
 import warnings
 from datetime import datetime
 import glob
-#from funcs import print_green, print_cyan, print_orange, print_red #, extract_project_no
-warnings.simplefilter("ignore")  # Suppress warnings if desired
-# Near the top of the file with other imports
-
+#######################################################################
+#file paths
+project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
 PICKLE_OUTPUT_DIR = r"C:\Users\jose.pineda\Desktop\smart_decon\operations\pickles"
 
+#######################################################################
+#testing
 # ==============================
-# HELPER & UTILITY FUNCTIONS
+# DATA LOADING FUNCTIONS
+# ==============================
+
+def load_rates_from_single_sheet(file_path):
+    print_green("Inside load_rates_from_single_sheet")
+    df_rates = pd.read_excel(file_path, sheet_name='Rates', header=None)
+    print_red("Head of full Rates sheet:")
+    print_green(str(df_rates.head(10)))
+
+    df_trm_vals = trm_ingestion(df_rates)
+    df_actual_rates = rates_ingestion(df_rates)
+    loaded_c = load_coef(df_rates)
+    loaded_rates = loaded_rates_ingestion(df_rates)
+
+    print_orange("TRM Values (df_trm_vals) shape: " + str(df_trm_vals.shape))
+    print_green("Actual Rates (df_actual_rates) shape: " + str(df_actual_rates.shape))
+    print_orange("Loaded Rates (loaded_rates) shape: " + str(loaded_rates.shape))
+    return df_trm_vals, df_actual_rates, loaded_c, loaded_rates
+
+def load_third_file_dynamic(third_file):
+    print_green("Inside load_third_file_dynamic")
+    df_raw = pd.read_excel(third_file, sheet_name='4_Contracted Projects', header=None, engine='openpyxl')
+    print_cyan("Shape of raw projects sheet: " + str(df_raw.shape))
+
+    nrows = len(df_raw)
+    end_row = None
+    for i in range(688, nrows - 1):
+        if pd.isna(df_raw.iloc[i, 1]) and pd.isna(df_raw.iloc[i+1, 1]):
+            end_row = i
+            break
+    if end_row is None:
+        end_row = nrows
+
+    df_trunc = df_raw.iloc[:end_row].copy()
+    print_orange("Shape after truncation: " + str(df_trunc.shape))
+
+    header = [str(col).strip() for col in df_trunc.iloc[0].tolist()]
+    df_data = df_trunc.iloc[1:].copy()
+    df_data = df_data[~df_data.apply(lambda row: list(row.astype(str).str.strip()) == header, axis=1)]
+    df_data.columns = header
+    df_data.columns = [col.strip() for col in df_data.columns]
+
+    if "Project No" not in df_data.columns:
+        first_col = df_data.columns[0]
+        df_data.rename(columns={first_col: "Project No"}, inplace=True)
+
+    df_data["Project No"] = df_data["Project No"].astype(str).str.strip().apply(standardize_project_no)
+
+    # Ensure the 'Month' column exists or derive it if possible
+    if 'Month' not in df_data.columns:
+        if 'Invoice Date' in df_data.columns:
+            # Derive 'Month' from 'Invoice Date' if available
+            df_data['Month'] = pd.to_datetime(df_data['Invoice Date'], errors='coerce').dt.month
+            print_green("Derived 'Month' column from 'Invoice Date'.")
+        else:
+            # Add a placeholder 'Month' column if it cannot be derived
+            df_data['Month'] = None
+            print_red("'Month' column not found or derivable. Added as None.")
+
+    # Debug: show a few rows for 1928
+    print_green("Projects after truncation & standardization, checking '1928':")
+    debug_1928 = df_data[df_data["Project No"].astype(str).str.contains("1928", na=False)]
+    print_cyan(str(debug_1928.head(10)))
+
+    return df_data.reset_index(drop=True)
+
+def load_timesheet_folder(folder_path):
+    """
+    Loads CSV files matching 'timesheet_report_*.csv' and merges them.
+    Also renames 'service item' -> 'Service Item' if present.
+    Returns the merged dataframe and the most recent date from filenames.
+    """
+    pattern = os.path.join(folder_path, "timesheet_report_*.csv")
+    csv_files = glob.glob(pattern)
+    if not csv_files:
+        print_red(f"No timesheet files found in {folder_path}")
+        return pd.DataFrame(), None
+
+    df_list = []
+    last_end_date = None
+    most_recent_date=None
+    for file_path in csv_files:
+        filename = os.path.basename(file_path)
+        match = re.search(r'thru_(\d{4}-\d{2}-\d{2})\.csv$', filename)
+        if match:
+            end_date_str = match.group(1)
+            try:
+                end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+                # Update most_recent_date if this date is more recent
+                if most_recent_date is None or end_date > most_recent_date:
+                    most_recent_date = end_date
+            except ValueError:
+                end_date = None
+        else:
+            end_date = None
+
+        df_temp = pd.read_csv(file_path, header=0, index_col=0)
+
+        # rename if you see "service item"
+        if 'service item' in df_temp.columns:
+            df_temp.rename(columns={'service item': 'Service Item'}, inplace=True)
+
+        df_temp["report_end_date"] = end_date
+        df_list.append(df_temp)
+        #last_end_date = end_date
+
+    df_merged = pd.concat(df_list, ignore_index=True)
+    
+    #convert recent date to string format for display
+    last_data_update = most_recent_date.strftime('%Y-%m-%d') if most_recent_date else "Unknown"
+    print_green(f"Most recent timesheet data date: {last_data_update}")
+    
+    # Save the most recent data update date to a file
+    if most_recent_date:
+        try:
+            with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "w") as f:
+                f.write(last_data_update)
+            print_green(f"Saved last data update date ({last_data_update}) to file")
+        except Exception as e:
+            print_red(f"Error saving last data update date: {str(e)}")
+    
+    return df_merged, most_recent_date
+
+def get_project_log_data(years=[2023, 2024, 2025]):
+    """Load and return the project log data from all invoice sheets for the specified years.
+    
+    Args:
+        years (list): List of years for which to load data (default: [2023, 2024, 2025])
+    
+    Returns:
+        pandas.DataFrame: The combined loaded project data with Month column and Year column
+    """
+    combined_df = pd.DataFrame()
+    
+    for year in years:
+        try:
+            # Use the correct sheet name based on year
+            sheet_name = f"5_Invoice-{year}"
+            
+            print_green(f"Attempting to load project log from: {project_log_path}, sheet: {sheet_name}")
+            df_projects = pd.read_excel(project_log_path, sheet_name=sheet_name, engine='openpyxl')
+            print_green(f"Successfully loaded sheet {sheet_name} with {len(df_projects)} rows")
+            
+            # Add a Year column to identify the source
+            df_projects['Year'] = year
+            
+            # Check if 'Month' column exists
+            if 'Month' in df_projects.columns:
+                # Convert Month to numeric values
+                df_projects['Month'] = pd.to_numeric(df_projects['Month'], errors='coerce')
+            else:
+                print_red(f"Month column not found in {sheet_name}")
+                # Try to find a column that might contain month information
+                date_columns = [col for col in df_projects.columns if 'date' in str(col).lower()]
+                if date_columns and 'Invoice Date' in date_columns:
+                    print_green(f"Deriving 'Month' column from 'Invoice Date'")
+                    df_projects['Month'] = pd.to_datetime(df_projects['Invoice Date'], errors='coerce').dt.month
+                elif len(df_projects.columns) > 0:
+                    # If no date column, check if first column might contain month info
+                    first_col = df_projects.columns[0]
+                    if df_projects[first_col].dtype in ['int64', 'float64'] or pd.to_numeric(df_projects[first_col], errors='coerce').notna().any():
+                        df_projects['Month'] = pd.to_numeric(df_projects[first_col], errors='coerce')
+            
+            # Check if Project No column exists, standardize if it does
+            if 'Project No' in df_projects.columns:
+                df_projects["Project No"] = df_projects["Project No"].astype(str).str.strip().apply(standardize_project_no)
+            
+            # Add to the combined DataFrame
+            combined_df = pd.concat([combined_df, df_projects], ignore_index=True)
+            
+        except Exception as e:
+            print_red(f"Error loading data for year {year}: {str(e)}")
+    
+    if combined_df.empty:
+        print_red("No data could be loaded from any year sheet")
+        # Return an empty DataFrame with required columns as fallback
+        return pd.DataFrame(columns=['Project No', 'Month', 'Actual', 'Invoice Date', 'Year'])
+    
+    print_green(f"Final combined dataframe has {len(combined_df)} rows")
+    return combined_df
+
+def import_forecast_invoicing():
+    """
+    Import forecast invoicing data from the '6_Summary Invoice' sheet of the project log.
+    Returns a DataFrame with forecast values for each month of 2025.
+    """
+    print_green("Loading forecast invoicing data...")
+    
+    try:
+        # Read the '6_Summary Invoice' sheet
+        df_forecast = pd.read_excel(
+            project_log_path, 
+            sheet_name='6_Summary Invoice',
+            header=None,  # No header so we can explicitly find it
+            engine='openpyxl'
+        )
+        
+        print_green(f"Successfully loaded '6_Summary Invoice' sheet with shape {df_forecast.shape}")
+        
+        # Find the header row (row containing 'FORECAST INVOICING')
+        header_row = None
+        for i in range(5):  # Check first few rows
+            if 'FORECAST INVOICING' in str(df_forecast.iloc[i].values):
+                header_row = i
+                break
+        
+        if header_row is None:
+            print_red("Could not find 'FORECAST INVOICING' header in the sheet")
+            # Try to find any row that might contain the header
+            for i in range(10):
+                row_text = ' '.join([str(x) for x in df_forecast.iloc[i].values])
+                if 'FORECAST' in row_text.upper() or 'BUDGET' in row_text.upper():
+                    header_row = i
+                    print_orange(f"Found possible header in row {i}: {row_text}")
+                    break
+                    
+        if header_row is None:
+            print_red("Could not identify the header row, using row 2 as default")
+            header_row = 2
+        
+        # Extract the column headers
+        headers = df_forecast.iloc[header_row].values
+        forecast_col_idx = None
+        month_col_idx = None
+        
+        # Find the column indices for month and forecast
+        for i, header in enumerate(headers):
+            header_str = str(header).upper()
+            if 'FORECAST' in header_str or 'BUDGET' in header_str:
+                forecast_col_idx = i
+            if 'MONTH' in header_str:
+                month_col_idx = i
+                
+        if forecast_col_idx is None:
+            print_red("Could not find forecast column")
+            # Look in column C (index 2) by default
+            forecast_col_idx = 2
+            print_orange(f"Using default column C (index {forecast_col_idx}) for forecast")
+            
+        if month_col_idx is None:
+            print_red("Could not find month column")
+            # Look in column B (index 1) by default
+            month_col_idx = 1
+            print_orange(f"Using default column B (index {month_col_idx}) for month")
+        
+        # Extract the data (12 rows starting from header row + 1)
+        data_start_row = header_row + 1
+        data_end_row = data_start_row + 12  # 12 months
+        
+        # Create the DataFrame with forecast values for each month
+        forecast_data = []
+        for i in range(data_start_row, min(data_end_row, len(df_forecast))):
+            row = df_forecast.iloc[i]
+            
+            # Extract month (could be number or name)
+            month_value = row.iloc[month_col_idx]
+            if pd.isna(month_value):
+                # Try to infer month from row number (1-12)
+                month = i - data_start_row + 1
+            else:
+                # Try to convert to int if it's a number
+                try:
+                    month = int(month_value)
+                except (ValueError, TypeError):
+                    # If it's a month name, try to convert to number
+                    month_str = str(month_value).strip().lower()
+                    month_dict = {
+                        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+                    }
+                    for key, val in month_dict.items():
+                        if key in month_str:
+                            month = val
+                            break
+                    else:
+                        month = i - data_start_row + 1  # Default to position
+            
+            # Extract forecast value
+            forecast_value = row.iloc[forecast_col_idx]
+            
+            # Try to convert to float if it's a string with $ or ,
+            if isinstance(forecast_value, str):
+                forecast_value = forecast_value.replace('$', '').replace(',', '')
+                try:
+                    forecast_value = float(forecast_value)
+                except ValueError:
+                    forecast_value = None
+                    
+            forecast_data.append({
+                'Month': month,
+                'MonthName': pd.Timestamp(2025, month, 1).strftime('%B'),
+                'Year': 2025,
+                'ForecastValue': forecast_value
+            })
+        
+        # Create DataFrame
+        df_result = pd.DataFrame(forecast_data)
+        
+        # Sort by month to ensure correct order
+        df_result = df_result.sort_values('Month')
+        
+        print_green(f"Successfully created forecast invoicing DataFrame with {len(df_result)} rows")
+        print_cyan("Forecast data sample:")
+        print(df_result.head())
+        
+        return df_result
+    
+    except Exception as e:
+        import traceback
+        print_red(f"Error loading forecast invoicing data: {str(e)}")
+        print_red(traceback.format_exc())
+        # Return empty DataFrame with the expected structure
+        return pd.DataFrame(columns=['Month', 'MonthName', 'Year', 'ForecastValue'])
+
+
+#########################################################################
+
+#warnings.simplefilter("ignore")  # Suppress warnings if desired
+
+
+# ==============================
+# DATA PROCESSING FUNCTIONS     
 # ==============================
 def calculate_new_er(df_project, project_no, df_merged_costs):
     # First check if there are any staff_type=1 entries (US employees) for this project
@@ -178,6 +507,15 @@ def calculate_decon_llc_invoiced(df_project, project_no, df_merged_costs, df_raw
     
     return decon_llc_invoiced
 
+######################################################
+
+
+
+
+
+
+
+
 
 def generate_monthly_report_data(selected_date, global_projects_df, global_merged_df, global_raw_invoices, project_log_path):
     """
@@ -221,7 +559,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
             print_green(f"Renamed first column from '{first_col_name}' to 'Month'")
 
         # Filter rows where Month column matches the selected month
-        df_month = df_sheet[pd.to_numeric(df_sheet['Month'], errors='coerce') == selected_month]
+        df_month = df_sheet[pd.to_numeric(df_sheet['Month'], errors='coerce') == selected_month].copy()
         print_green(f"Found {len(df_month)} projects for month {selected_month} in year {selected_year}")
 
         # Validate the DataFrame before processing
@@ -315,12 +653,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
             # Calculate DECON LLC Invoiced (excluding Colombian staff for invoiced amount)
             decon_llc_invoiced = calculate_decon_llc_invoiced(global_projects_df, project_no, global_merged_df, global_raw_invoices)
 
-            # Calculate Invoiced Percentage (total_invoice / contracted_amount)
-            invoiced_percent = (total_invoice / contracted_amount * 100) if contracted_amount and total_invoice else None
-            
-            # Create a numeric version of Invoiced Percentage for conditional formatting
-            invoiced_percent_num = invoiced_percent if invoiced_percent is not None else -1  # Use -1 to represent N/A
-            
+
             def extract_number_part(value):
                 """Extract just the number prefix from strings like '1-Something', '2-Other', etc."""
                 if not isinstance(value, str):
@@ -337,7 +670,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
             # Get Projected, Actual, and Acummulative from the sheet for this project
             project_month_data = df_month[df_month[project_column].apply(
                 lambda x: standardize_project_no(str(x)) == project_no
-            )]
+            )].copy()
             
             # Extract Projected, Actual, and Acummulative values
             projected_value = None
@@ -378,12 +711,21 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                         acummulative_value = float(acummulative_value) if pd.notnull(acummulative_value) else None
                     except:
                         acummulative_value = None
+                        # Calculate Invoiced Percentage (total_invoice / contracted_amount)
+            # Store both numeric and formatted versions of invoiced_percent
+            if contracted_amount and actual_value:
+                invoiced_percent_num = (actual_value / contracted_amount * 100)
+                invoiced_percent = f"{invoiced_percent_num:.1f}%"  # Formatted for display
+            else:
+                invoiced_percent_num = None
+                invoiced_percent = None
 
+
+            
             # Build the project record for the table
             project_record = {
                 'Project No': project_no,
                 'Clients': project_row.get('Clients', 'Unknown'),
-                #'Status': project_row.get('Status', 'Unknown'),
                 'Status': extract_number_part(project_row.get('Status', 'Unknown')),
                 'PM': project_row.get('PM', 'Unknown'),
                 'Project Description': project_row.get('Project Description', 'No Description'),
@@ -392,18 +734,26 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Market Segment': extract_number_part(project_row.get('Market Segment', 'Unknown')),  
                 'Type': extract_number_part(project_row.get('Type', 'Unknown')),  
                 
-                'Contracted Amount': f"${contracted_amount:,.2f}" if contracted_amount else "N/A",
-                'Projected': f"${projected_value:,.2f}" if projected_value else "$0.00",  # Display "$0.00" instead of "N/A"
-                'Actual': f"${actual_value:,.2f}" if actual_value else "$0.00",  # Display "$0.00" instead of "N/A"
-                'Acummulative': f"${acummulative_value:,.2f}" if acummulative_value else "N/A",
-                'Monthly Invoice': f"${monthly_invoice:,.2f}" if monthly_invoice else "N/A",
-                'Total Invoice': f"${total_invoice:,.2f}" if total_invoice else "N/A",
-                'Total Cost': f"${total_cost:,.2f}" if total_cost else "N/A",
-                'Invoiced %': f"{invoiced_percent:.1f}%" if invoiced_percent is not None else "0.0%",  # Display "0.0%" instead of "N/A"
+                
+   
+                'Contracted Amount': contracted_amount if contracted_amount is not None else None,
+                'Projected': projected_value if projected_value is not None else 0,
+                'Actual': actual_value if actual_value is not None else 0,
+                'Acummulative': acummulative_value if acummulative_value is not None else None,
+                'Monthly Invoice': monthly_invoice if monthly_invoice is not None else 0,
+                'Total Invoice': total_invoice if total_invoice is not None else 0,
+                'Total Cost': total_cost if total_cost is not None else 0,
+                'Invoiced %': invoiced_percent if invoiced_percent is not None else 0,
+                'Invoiced %_num': invoiced_percent_num if invoiced_percent_num is not None else 0,
+                
+               
+                
                 # Add hidden numeric column for Invoiced %
                 'Invoiced %_num': invoiced_percent_num,
-                'ER Contract': f"{er_contract:.2f}" if er_contract else "N/A",
-                'ER Invoiced': f"{er_invoiced:.2f}" if er_invoiced else "N/A",
+                'ER Contract': er_contract if er_contract is not None else None,
+                'ER Invoiced': er_invoiced if er_invoiced is not None else None,
+                'ER DECON LLC': new_er if new_er is not None else None,
+                'DECON LLC Invoiced': decon_llc_invoiced if decon_llc_invoiced is not None else None,
             }
 
             # Check if there are worked hours for this project for ER DECON LLC display
@@ -420,7 +770,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 if new_er is not None:
                     project_record['ER DECON LLC'] = f"{new_er:.2f}"
                 # Special handling for 100% invoiced projects - should never show 0.00
-                elif invoiced_percent is not None and invoiced_percent >= 99.9:  # Use 99.9% to handle floating point issues
+                elif invoiced_percent_num is not None and invoiced_percent_num >= 99.9:  # Use 99.9% to handle floating point issues
                     # For 100% invoiced projects, show N/A if we can't calculate a proper value
                     project_record['ER DECON LLC'] = "N/A"
                 else:
@@ -438,7 +788,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 if decon_llc_invoiced is not None:
                     project_record['DECON LLC Invoiced'] = f"{decon_llc_invoiced:.2f}"
                 # Special handling for 100% invoiced projects - should never show 0.00
-                elif invoiced_percent is not None and invoiced_percent >= 99.9:  # Use 99.9% to handle floating point issues
+                elif invoiced_percent_num is not None and invoiced_percent_num >= 99.9:  # Use 99.9% to handle floating point issues
                     # For 100% invoiced projects, show N/A if we can't calculate a proper value
                     project_record['DECON LLC Invoiced'] = "N/A"
                 else:
@@ -493,42 +843,6 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
 
 
 
-def extract_project_no(jobcode_str):
-    """Return the first 7 characters from jobcode_str (Project No)."""
-    return str(jobcode_str)[:7].strip()
-
-
-def print_orange(message):
-    """Print a debug message in orange."""
-    print("\033[38;5;208m" + str(message) + "\033[0m")
-
-def print_red(message):
-    """Print a debug message in red."""
-    print("\033[91m" + str(message) + "\033[0m")
-
-def print_cyan(message):
-    """Print a debug message in cyan."""
-    print("\033[96m" + str(message) + "\033[0m")
-    
-    
-    
-    
-def print_green(message):
-    """Print a debug message in green."""
-    print("\033[92m" + str(message) + "\033[0m")
-
-
-def sanitize_filename(filename):
-    """Remove invalid characters for file names."""
-    filename_str = str(filename)
-    return re.sub(r'[<>:"/\\|?*]', '', filename_str)
-
-def standardize_project_no(x):
-    """Convert a project number to float with 2 decimals, or strip string."""
-    try:
-        return f"{float(x):.2f}"
-    except Exception:
-        return str(x).strip()
 
 
 # ==============================
@@ -634,26 +948,42 @@ def loaded_rates_ingestion(rates_df):
     print_red(str(lr_df.head()))
     return lr_df
 
-def load_rates_from_single_sheet(file_path):
-    print_green("Inside load_rates_from_single_sheet")
-    df_rates = pd.read_excel(file_path, sheet_name='Rates', header=None)
-    print_red("Head of full Rates sheet:")
-    print_green(str(df_rates.head(10)))
-
-    df_trm_vals = trm_ingestion(df_rates)
-    df_actual_rates = rates_ingestion(df_rates)
-    loaded_c = load_coef(df_rates)
-    loaded_rates = loaded_rates_ingestion(df_rates)
-
-    print_orange("TRM Values (df_trm_vals) shape: " + str(df_trm_vals.shape))
-    print_green("Actual Rates (df_actual_rates) shape: " + str(df_actual_rates.shape))
-    print_orange("Loaded Rates (loaded_rates) shape: " + str(loaded_rates.shape))
-    return df_trm_vals, df_actual_rates, loaded_c, loaded_rates
-
 
 # ==============================
 # CALCULATION FUNCTIONS
 # ==============================
+
+
+
+def calculate_invoiced_percentage(actual_value, contracted_amount):
+    """
+    Calculate invoiced percentage properly, handling edge cases.
+    
+    Args:
+        actual_value: The actual invoice amount
+        contracted_amount: The contracted amount
+        
+    Returns:
+        tuple: (formatted_percentage_string, numeric_percentage_for_filtering)
+    """
+    # Convert values to float if they're strings
+    if isinstance(actual_value, str):
+        actual_value = float(actual_value.replace('$', '').replace(',', ''))
+    if isinstance(contracted_amount, str):
+        contracted_amount = float(contracted_amount.replace('$', '').replace(',', ''))
+        
+    # Calculate percentage if we have valid inputs
+    if contracted_amount is not None and contracted_amount > 0 and actual_value is not None and actual_value > 0:
+        percentage = (actual_value / contracted_amount) * 100
+        return f"{percentage:.1f}%", percentage
+    elif actual_value is not None and actual_value > 0:
+        # We have invoices but no valid contract amount
+        return "N/A", -1  # Use -1 as a sentinel value for N/A
+    else:
+        # No invoice amount
+        return "0.0%", 0
+
+
 def calculate_day_cost(merged_df):
     """
     Example day_cost logic:
@@ -737,120 +1067,26 @@ def assign_total_hours(merged_df):
 # ==============================
 # PROJECTS FILE & BACKUP
 # ==============================
-def load_third_file_dynamic(third_file):
-    print_green("Inside load_third_file_dynamic")
-    df_raw = pd.read_excel(third_file, sheet_name='4_Contracted Projects', header=None, engine='openpyxl')
-    print_cyan("Shape of raw projects sheet: " + str(df_raw.shape))
 
-    nrows = len(df_raw)
-    end_row = None
-    for i in range(688, nrows - 1):
-        if pd.isna(df_raw.iloc[i, 1]) and pd.isna(df_raw.iloc[i+1, 1]):
-            end_row = i
-            break
-    if end_row is None:
-        end_row = nrows
-
-    df_trunc = df_raw.iloc[:end_row].copy()
-    print_orange("Shape after truncation: " + str(df_trunc.shape))
-
-    header = [str(col).strip() for col in df_trunc.iloc[0].tolist()]
-    df_data = df_trunc.iloc[1:].copy()
-    df_data = df_data[~df_data.apply(lambda row: list(row.astype(str).str.strip()) == header, axis=1)]
-    df_data.columns = header
-    df_data.columns = [col.strip() for col in df_data.columns]
-
-    if "Project No" not in df_data.columns:
-        first_col = df_data.columns[0]
-        df_data.rename(columns={first_col: "Project No"}, inplace=True)
-
-    df_data["Project No"] = df_data["Project No"].astype(str).str.strip().apply(standardize_project_no)
-
-    # Ensure the 'Month' column exists or derive it if possible
-    if 'Month' not in df_data.columns:
-        if 'Invoice Date' in df_data.columns:
-            # Derive 'Month' from 'Invoice Date' if available
-            df_data['Month'] = pd.to_datetime(df_data['Invoice Date'], errors='coerce').dt.month
-            print_green("Derived 'Month' column from 'Invoice Date'.")
-        else:
-            # Add a placeholder 'Month' column if it cannot be derived
-            df_data['Month'] = None
-            print_red("'Month' column not found or derivable. Added as None.")
-
-    # Debug: show a few rows for 1928
-    print_green("Projects after truncation & standardization, checking '1928':")
-    debug_1928 = df_data[df_data["Project No"].astype(str).str.contains("1928", na=False)]
-    print_cyan(str(debug_1928.head(10)))
-
-    return df_data.reset_index(drop=True)
 
 
 # ==============================
 # TIMESHEET FILE LOADING
 # ==============================
-def load_timesheet_folder(folder_path):
-    """
-    Loads CSV files matching 'timesheet_report_*.csv' and merges them.
-    Also renames 'service item' -> 'Service Item' if present.
-    Returns the merged dataframe and the most recent date from filenames.
-    """
-    pattern = os.path.join(folder_path, "timesheet_report_*.csv")
-    csv_files = glob.glob(pattern)
-    if not csv_files:
-        print_red(f"No timesheet files found in {folder_path}")
-        return pd.DataFrame(), None
-
-    df_list = []
-    last_end_date = None
-    most_recent_date=None
-    for file_path in csv_files:
-        filename = os.path.basename(file_path)
-        match = re.search(r'thru_(\d{4}-\d{2}-\d{2})\.csv$', filename)
-        if match:
-            end_date_str = match.group(1)
-            try:
-                end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
-                # Update most_recent_date if this date is more recent
-                if most_recent_date is None or end_date > most_recent_date:
-                    most_recent_date = end_date
-            except ValueError:
-                end_date = None
-        else:
-            end_date = None
-
-        df_temp = pd.read_csv(file_path, header=0, index_col=0)
-
-        # rename if you see "service item"
-        if 'service item' in df_temp.columns:
-            df_temp.rename(columns={'service item': 'Service Item'}, inplace=True)
-
-        df_temp["report_end_date"] = end_date
-        df_list.append(df_temp)
-        #last_end_date = end_date
-
-    df_merged = pd.concat(df_list, ignore_index=True)
-    
-    #convert recent date to string format for display
-    last_data_update = most_recent_date.strftime('%Y-%m-%d') if most_recent_date else "Unknown"
-    print_green(f"Most recent timesheet data date: {last_data_update}")
-    
-    # Save the most recent data update date to a file
-    if most_recent_date:
-        try:
-            with open(os.path.join(PICKLE_OUTPUT_DIR, "last_data_update.txt"), "w") as f:
-                f.write(last_data_update)
-            print_green(f"Saved last data update date ({last_data_update}) to file")
-        except Exception as e:
-            print_red(f"Error saving last data update date: {str(e)}")
-    
-    return df_merged, most_recent_date
 
 
 def truncate_at_total(df):
     df_copy = df.copy()
-    df_copy.fillna("", inplace=True)
+    
+    # Fill NA values appropriately by dtype
+    for col in df_copy.columns:
+        if df_copy[col].dtype == 'object':  # String columns
+            df_copy[col] = df_copy[col].fillna("")
+        else:  # Numeric or other columns
+            df_copy[col] = df_copy[col].fillna(0)
+    
     for i in range(len(df_copy)):
-        row_str = " ".join(str(x) for x in df_copy.iloc[i].values)
+        row_str = " ".join([str(x) for x in df_copy.iloc[i].values])
         if "TOTAL" in row_str.upper():
             return df_copy.iloc[:i].copy()
     return df_copy
@@ -975,10 +1211,10 @@ def main():
     df_invoices_2023['Actual'] = pd.to_numeric(df_invoices_2023['Actual'], errors='coerce')
     df_invoices_2023['Invoice_Year'] = 2023  # Add explicit year column based on sheet name
 
-    df_invoices_2024 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2024', header=0)
+    df_invoices_2024 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2024', header=0).copy()
     df_invoices_2024['Invoice_Year'] = 2024  # Add explicit year column based on sheet name
 
-    df_invoices_2025 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2025', header=0)
+    df_invoices_2025 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2025', header=0).copy()
     df_invoices_2025['Invoice_Year'] = 2025  # Add explicit year column based on sheet name
 
     # Possibly truncate each at 'TOTAL'
@@ -998,6 +1234,9 @@ def main():
     df_invoices_2025['Invoice No'] = df_invoices_2025['Invoice No'].apply(keep_second_number)
 
     # Convert 'Month' column to numeric in all dataframes
+    df_invoices_2023=df_invoices_2023.copy()
+    #df_invoices_2024=df_invoices_2024.copy()
+    #df_invoices_2025=df_invoices_2025.copy()
     df_invoices_2023['Month_numeric'] = pd.to_numeric(df_invoices_2023['Month'], errors='coerce')
     df_invoices_2024['Month_numeric'] = pd.to_numeric(df_invoices_2024['Month'], errors='coerce')
     df_invoices_2025['Month_numeric'] = pd.to_numeric(df_invoices_2025['Month'], errors='coerce')
@@ -1075,9 +1314,23 @@ def main():
     return merged_df, df_projects, global_invoices, raw_invoices, last_update, last_data_update
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 last_update = pd.to_datetime('today').strftime('%Y-%m-%d')
-
-
+########################################
+# ==============================
+# DATA CACHING FUNCTIONS 
+# ==============================
 def precompute_and_save():
     """
     Runs the main data processing pipeline and saves the resulting DataFrames
@@ -1111,72 +1364,9 @@ def precompute_and_save():
     print_green("Precomputed pickle files saved successfully.")
 
 
-# Exporting the project log and related variables for external use
-project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
-    
-
-def get_project_log_data(years=[2023, 2024, 2025]):
-    """Load and return the project log data from all invoice sheets for the specified years.
-    
-    Args:
-        years (list): List of years for which to load data (default: [2023, 2024, 2025])
-    
-    Returns:
-        pandas.DataFrame: The combined loaded project data with Month column and Year column
-    """
-    combined_df = pd.DataFrame()
-    
-    for year in years:
-        try:
-            # Use the correct sheet name based on year
-            sheet_name = f"5_Invoice-{year}"
-            
-            print_green(f"Attempting to load project log from: {project_log_path}, sheet: {sheet_name}")
-            df_projects = pd.read_excel(project_log_path, sheet_name=sheet_name, engine='openpyxl')
-            print_green(f"Successfully loaded sheet {sheet_name} with {len(df_projects)} rows")
-            
-            # Add a Year column to identify the source
-            df_projects['Year'] = year
-            
-            # Check if 'Month' column exists
-            if 'Month' in df_projects.columns:
-                # Convert Month to numeric values
-                df_projects['Month'] = pd.to_numeric(df_projects['Month'], errors='coerce')
-            else:
-                print_red(f"Month column not found in {sheet_name}")
-                # Try to find a column that might contain month information
-                date_columns = [col for col in df_projects.columns if 'date' in str(col).lower()]
-                if date_columns and 'Invoice Date' in date_columns:
-                    print_green(f"Deriving 'Month' column from 'Invoice Date'")
-                    df_projects['Month'] = pd.to_datetime(df_projects['Invoice Date'], errors='coerce').dt.month
-                elif len(df_projects.columns) > 0:
-                    # If no date column, check if first column might contain month info
-                    first_col = df_projects.columns[0]
-                    if df_projects[first_col].dtype in ['int64', 'float64'] or pd.to_numeric(df_projects[first_col], errors='coerce').notna().any():
-                        df_projects['Month'] = pd.to_numeric(df_projects[first_col], errors='coerce')
-            
-            # Check if Project No column exists, standardize if it does
-            if 'Project No' in df_projects.columns:
-                df_projects["Project No"] = df_projects["Project No"].astype(str).str.strip().apply(standardize_project_no)
-            
-            # Add to the combined DataFrame
-            combined_df = pd.concat([combined_df, df_projects], ignore_index=True)
-            
-        except Exception as e:
-            print_red(f"Error loading data for year {year}: {str(e)}")
-    
-    if combined_df.empty:
-        print_red("No data could be loaded from any year sheet")
-        # Return an empty DataFrame with required columns as fallback
-        return pd.DataFrame(columns=['Project No', 'Month', 'Actual', 'Invoice Date', 'Year'])
-    
-    print_green(f"Final combined dataframe has {len(combined_df)} rows")
-    return combined_df
-
 
 # Exporting the function for external use
 __all__ = ['get_project_log_data']
-
 
 def last_update():
     """Read the last data update date from file"""
@@ -1194,139 +1384,6 @@ def last_data_update():
     except Exception:
         return "Unknown"
 
-
-def import_forecast_invoicing():
-    """
-    Import forecast invoicing data from the '6_Summary Invoice' sheet of the project log.
-    Returns a DataFrame with forecast values for each month of 2025.
-    """
-    print_green("Loading forecast invoicing data...")
-    
-    try:
-        # Read the '6_Summary Invoice' sheet
-        df_forecast = pd.read_excel(
-            project_log_path, 
-            sheet_name='6_Summary Invoice',
-            header=None,  # No header so we can explicitly find it
-            engine='openpyxl'
-        )
-        
-        print_green(f"Successfully loaded '6_Summary Invoice' sheet with shape {df_forecast.shape}")
-        
-        # Find the header row (row containing 'FORECAST INVOICING')
-        header_row = None
-        for i in range(5):  # Check first few rows
-            if 'FORECAST INVOICING' in str(df_forecast.iloc[i].values):
-                header_row = i
-                break
-        
-        if header_row is None:
-            print_red("Could not find 'FORECAST INVOICING' header in the sheet")
-            # Try to find any row that might contain the header
-            for i in range(10):
-                row_text = ' '.join([str(x) for x in df_forecast.iloc[i].values])
-                if 'FORECAST' in row_text.upper() or 'BUDGET' in row_text.upper():
-                    header_row = i
-                    print_orange(f"Found possible header in row {i}: {row_text}")
-                    break
-                    
-        if header_row is None:
-            print_red("Could not identify the header row, using row 2 as default")
-            header_row = 2
-        
-        # Extract the column headers
-        headers = df_forecast.iloc[header_row].values
-        forecast_col_idx = None
-        month_col_idx = None
-        
-        # Find the column indices for month and forecast
-        for i, header in enumerate(headers):
-            header_str = str(header).upper()
-            if 'FORECAST' in header_str or 'BUDGET' in header_str:
-                forecast_col_idx = i
-            if 'MONTH' in header_str:
-                month_col_idx = i
-                
-        if forecast_col_idx is None:
-            print_red("Could not find forecast column")
-            # Look in column C (index 2) by default
-            forecast_col_idx = 2
-            print_orange(f"Using default column C (index {forecast_col_idx}) for forecast")
-            
-        if month_col_idx is None:
-            print_red("Could not find month column")
-            # Look in column B (index 1) by default
-            month_col_idx = 1
-            print_orange(f"Using default column B (index {month_col_idx}) for month")
-        
-        # Extract the data (12 rows starting from header row + 1)
-        data_start_row = header_row + 1
-        data_end_row = data_start_row + 12  # 12 months
-        
-        # Create the DataFrame with forecast values for each month
-        forecast_data = []
-        for i in range(data_start_row, min(data_end_row, len(df_forecast))):
-            row = df_forecast.iloc[i]
-            
-            # Extract month (could be number or name)
-            month_value = row.iloc[month_col_idx]
-            if pd.isna(month_value):
-                # Try to infer month from row number (1-12)
-                month = i - data_start_row + 1
-            else:
-                # Try to convert to int if it's a number
-                try:
-                    month = int(month_value)
-                except (ValueError, TypeError):
-                    # If it's a month name, try to convert to number
-                    month_str = str(month_value).strip().lower()
-                    month_dict = {
-                        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-                        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-                    }
-                    for key, val in month_dict.items():
-                        if key in month_str:
-                            month = val
-                            break
-                    else:
-                        month = i - data_start_row + 1  # Default to position
-            
-            # Extract forecast value
-            forecast_value = row.iloc[forecast_col_idx]
-            
-            # Try to convert to float if it's a string with $ or ,
-            if isinstance(forecast_value, str):
-                forecast_value = forecast_value.replace('$', '').replace(',', '')
-                try:
-                    forecast_value = float(forecast_value)
-                except ValueError:
-                    forecast_value = None
-                    
-            forecast_data.append({
-                'Month': month,
-                'MonthName': pd.Timestamp(2025, month, 1).strftime('%B'),
-                'Year': 2025,
-                'ForecastValue': forecast_value
-            })
-        
-        # Create DataFrame
-        df_result = pd.DataFrame(forecast_data)
-        
-        # Sort by month to ensure correct order
-        df_result = df_result.sort_values('Month')
-        
-        print_green(f"Successfully created forecast invoicing DataFrame with {len(df_result)} rows")
-        print_cyan("Forecast data sample:")
-        print(df_result.head())
-        
-        return df_result
-    
-    except Exception as e:
-        import traceback
-        print_red(f"Error loading forecast invoicing data: {str(e)}")
-        print_red(traceback.format_exc())
-        # Return empty DataFrame with the expected structure
-        return pd.DataFrame(columns=['Month', 'MonthName', 'Year', 'ForecastValue'])
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from dash import dcc
 # Import our separate modules
 import data_processing
 import config
-from data_processing import calculate_new_er,extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
+from data_processing import calculate_invoiced_percentage, calculate_new_er,extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
 import base64
 import plotly.io as pio
