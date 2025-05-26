@@ -464,12 +464,11 @@ def calculate_decon_llc_invoiced(df_project, project_no, df_merged_costs, df_raw
             except Exception as e:
                 if debug_project:
                     print_orange(f"DEBUG {project_no}: Error extracting invoiced %: {str(e)}")
-    
-    # Get the total invoiced amount for this project
+      # Get the total invoiced amount for this project
     invoiced_amount = None
     project_invoices = df_raw_invoices[df_raw_invoices['Project No'].apply(
         lambda x: standardize_project_no(str(x)) == project_no
-    )]
+    )].copy()
     
     if not project_invoices.empty:
         # Convert 'Actual' column to numeric before summing
@@ -602,35 +601,51 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 print_red(f"Project {project_no} not found in projects database!")
                 continue
 
-            project_row = project_df.iloc[0]
-
-            # Get all invoices for this project (for ER calculation)
+            project_row = project_df.iloc[0]            # Get all invoices for this project (for ER calculation)
             project_invoices = global_raw_invoices[global_raw_invoices['Project No'].apply(
                 lambda x: standardize_project_no(str(x)) == project_no
             )]
 
-            if project_invoices.empty:
-                print_red(f"No invoices found for project {project_no}")
-                # Continue with default values for invoice-related fields
-                monthly_invoice = 0
-                total_invoice = 0
-            else:
-                # Convert 'Actual' column to numeric before summing
-                project_invoices['Actual'] = pd.to_numeric(project_invoices['Actual'], errors='coerce')
-
-                # Get monthly invoice amount from the sheet
-                monthly_invoice_col = 'Actual' if 'Actual' in df_month.columns else None
-                if monthly_invoice_col:
-                    monthly_invoice = df_month.loc[
-                        df_month[project_column].apply(lambda x: standardize_project_no(str(x)) == project_no),
-                        monthly_invoice_col
-                    ].sum()
+            if not project_invoices.empty:
+                # First, ensure 'Actual' column is numeric
+                project_invoices['Actual'] = project_invoices['Actual'].apply(
+                    lambda x: float(str(x).replace('$', '').replace(',', '')) 
+                    if pd.notnull(x) else 0
+                )
+                
+                # Sort by date to get latest versions
+                if 'Invoice Date' in project_invoices.columns:
+                    project_invoices = project_invoices.sort_values('Invoice Date', ascending=True)
+                
+                # Check if we have an invoice number column to identify unique invoices
+                if 'Invoice No' in project_invoices.columns:
+                    # Group by invoice number and take the latest version of each invoice
+                    latest_invoices = project_invoices.groupby('Invoice No', as_index=False).last()
+                    total_invoice = latest_invoices['Actual'].sum()
+                    print(f"DEBUG: Using {len(latest_invoices)} unique invoices after removing duplicates")
                 else:
-                    monthly_invoice = 0
+                    # If no invoice number, use all entries (original behavior)
+                    total_invoice = project_invoices['Actual'].sum()
+            else:
+                total_invoice = 0
+            
+            
+            # Before filtering
+            print(f"DEBUG: For Project {project_no} - Looking for matching invoices in {len(global_raw_invoices)} records")
+            print(f"DEBUG: First 3 invoice Project No values: {global_raw_invoices['Project No'].head(3).tolist()}")
+            print(f"DEBUG: First 3 standardized values: {global_raw_invoices['Project No'].head(3).apply(lambda x: standardize_project_no(str(x))).tolist()}")
+            print(f"DEBUG: Project No we're looking for: {project_no}")
 
-                # Get total invoice amount (cumulative)
-                total_invoice = project_invoices['Actual'].sum()
-
+            # After filtering
+            print(f"DEBUG: Found {len(project_invoices)} invoices for project {project_no}")
+            if not project_invoices.empty:
+                print(f"DEBUG: Invoice amounts: {project_invoices['Actual'].tolist()}")
+                print(f"DEBUG: Total invoice: {project_invoices['Actual'].sum()}")
+            else:
+                print(f"DEBUG: No invoices found for project {project_no}")
+            
+            
+            
             # Get total cost from timesheet data
             project_costs = global_merged_df[global_merged_df['Project No'] == project_no]
             total_cost = project_costs['day_cost'].sum() if not project_costs.empty else 0
@@ -713,8 +728,8 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                         acummulative_value = None
                         # Calculate Invoiced Percentage (total_invoice / contracted_amount)
             # Store both numeric and formatted versions of invoiced_percent
-            if contracted_amount and actual_value:
-                invoiced_percent_num = (actual_value / contracted_amount * 100)
+            if contracted_amount and total_invoice:
+                invoiced_percent_num = (total_invoice / contracted_amount * 100)
                 invoiced_percent = f"{invoiced_percent_num:.1f}%"  # Formatted for display
             else:
                 invoiced_percent_num = None
@@ -734,22 +749,14 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Market Segment': extract_number_part(project_row.get('Market Segment', 'Unknown')),  
                 'Type': extract_number_part(project_row.get('Type', 'Unknown')),  
                 
-                
-   
-                'Contracted Amount': contracted_amount if contracted_amount is not None else None,
+                       'Contracted Amount': contracted_amount if contracted_amount is not None else None,
                 'Projected': projected_value if projected_value is not None else 0,
                 'Actual': actual_value if actual_value is not None else 0,
                 'Acummulative': acummulative_value if acummulative_value is not None else None,
-                'Monthly Invoice': monthly_invoice if monthly_invoice is not None else 0,
+                'Monthly Invoice': actual_value if actual_value is not None else 0,  # Using actual_value for monthly invoice
                 'Total Invoice': total_invoice if total_invoice is not None else 0,
-                'Total Cost': total_cost if total_cost is not None else 0,
-                'Invoiced %': invoiced_percent if invoiced_percent is not None else 0,
+                'Total Cost': total_cost if total_cost is not None else 0,                'Invoiced %': invoiced_percent if invoiced_percent is not None else 0,
                 'Invoiced %_num': invoiced_percent_num if invoiced_percent_num is not None else 0,
-                
-               
-                
-                # Add hidden numeric column for Invoiced %
-                'Invoiced %_num': invoiced_percent_num,
                 'ER Contract': er_contract if er_contract is not None else None,
                 'ER Invoiced': er_invoiced if er_invoiced is not None else None,
                 'ER DECON LLC': new_er if new_er is not None else None,
@@ -1208,6 +1215,10 @@ def main():
         .str.replace('$','', regex=False)
         .str.replace(',','', regex=False)
     )
+    
+
+    
+    
     df_invoices_2023['Actual'] = pd.to_numeric(df_invoices_2023['Actual'], errors='coerce')
     df_invoices_2023['Invoice_Year'] = 2023  # Add explicit year column based on sheet name
 
@@ -1221,6 +1232,21 @@ def main():
     df_invoices_2023 = truncate_at_total(df_invoices_2023)
     df_invoices_2024 = truncate_at_total(df_invoices_2024)
     df_invoices_2025 = truncate_at_total(df_invoices_2025)  # Now truncate 2025 data also
+
+
+    # After loading all invoice dataframes
+    for df in [df_invoices_2023, df_invoices_2024, df_invoices_2025]:
+        if 'Actual' in df.columns:
+            df['Actual'] = (
+                df['Actual'].astype(str)
+                .str.replace('$','', regex=False)
+                .str.replace(',','', regex=False)
+            )
+            df['Actual'] = pd.to_numeric(df['Actual'], errors='coerce')
+    
+    
+
+
 
     # Clean invoice numbers
     def keep_second_number(val):
