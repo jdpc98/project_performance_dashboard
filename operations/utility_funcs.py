@@ -1,5 +1,5 @@
 # funcs.py
-import dash
+import dash 
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output, State
 from dash.dash_table.Format import Format, Scheme, Symbol
@@ -39,10 +39,17 @@ def print_green(message):
     """Print a debug message in green."""
     print("\033[92m" + str(message) + "\033[0m")
 
-def extract_project_no(jobcode_str):
-    """Return the first 7 characters from jobcode_str (Project No)."""
-    return str(jobcode_str)[:7].strip()
-
+def extract_project_number(jobcode):
+    """Extrae el número de proyecto del jobcode_2"""
+    if pd.isna(jobcode) or not isinstance(jobcode, str):
+        return None
+    
+    # Buscar patrón de número al inicio (ej: "1237", "1235.00")
+    import re
+    match = re.match(r'^(\d+(?:\.\d+)?)', jobcode.strip())
+    if match:
+        return match.group(1)
+    return None
 
 def sanitize_filename(filename):
     """Remove invalid characters for file names."""

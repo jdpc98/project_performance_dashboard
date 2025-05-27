@@ -11,7 +11,7 @@ from dash import dcc
 # Import our separate modules
 import data_processing
 import config
-from data_processing import calculate_invoiced_percentage, calculate_new_er,extract_project_no, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
+from data_processing import calculate_invoiced_percentage, calculate_new_er,extract_project_number, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
 import base64
 import plotly.io as pio
@@ -76,7 +76,7 @@ else:
 
 
 
-def conditional_extract_project_no(row):
+def conditional_extract_project_number(row):
     """
     If jobcode_2 starts with '1928', use the first 7 characters of jobcode_3;
     otherwise, use the first 7 characters of jobcode_2.
@@ -94,9 +94,9 @@ def conditional_extract_project_no(row):
 #################################################################################################################
 #create new id for all project storage
 #if 'Project No' not in global_merged_df.columns:
-#    global_merged_df['Project No'] = global_merged_df.apply(conditional_extract_project_no, axis=1)
+#    global_merged_df['Project No'] = global_merged_df.apply(conditional_extract_project_number, axis=1)
     
-global_merged_df['Project No'] = global_merged_df.apply(conditional_extract_project_no, axis=1)
+global_merged_df['Project No'] = global_merged_df.apply(conditional_extract_project_number, axis=1)
 
 #import last update date for display on dash
 with open(os.path.join(PICKLE_OUTPUT_DIR, "last_update.txt"), "r") as f:
@@ -974,7 +974,7 @@ def export_client_pdf(n_clicks, selected_client, start_date, end_date):
             (df_timesheet_filtered['local_date'] <= end_date)
         ]
     # Extract "Project No" from jobcode_2
-    df_timesheet_filtered['Project No'] = df_timesheet_filtered['jobcode_2'].apply(extract_project_no)
+    df_timesheet_filtered['Project No'] = df_timesheet_filtered['jobcode_2'].apply(extract_project_number)
     cost_grouped = df_timesheet_filtered.groupby('Project No', as_index=False)['day_cost'].sum()
     cost_grouped.rename(columns={'day_cost': 'CostNum'}, inplace=True)
     
@@ -1060,7 +1060,7 @@ def export_client_excel(n_clicks, selected_client, start_date, end_date):
         df_timesheet_filtered = df_timesheet_filtered[
             (df_timesheet_filtered['local_date'] >= start_date) & (df_timesheet_filtered['local_date'] <= end_date)
         ]
-    df_timesheet_filtered['Project No'] = df_timesheet_filtered['jobcode_2'].apply(extract_project_no)
+    df_timesheet_filtered['Project No'] = df_timesheet_filtered['jobcode_2'].apply(extract_project_number)
     cost_grouped = df_timesheet_filtered.groupby('Project No', as_index=False)['day_cost'].sum()
     cost_grouped.rename(columns={'day_cost': 'CostNum'}, inplace=True)
     
@@ -1217,7 +1217,7 @@ def update_invoice_table(selected_jobcode):
 def update_client_summary_pies(selected_tab):
     import plotly.express as px
     df = global_merged_df.copy()
-    df['Project No'] = df['jobcode_2'].apply(extract_project_no)
+    df['Project No'] = df['jobcode_2'].apply(extract_project_number)
     df_merged = pd.merge(
         df,
         global_projects_df[['Project No', 'Clients']],
@@ -1349,7 +1349,7 @@ def update_client_summary(selected_client, start_date, end_date):
         ]
         
     # Extract "Project No" from "jobcode_2"
-    df_timesheet_filtered['Project No'] = df_timesheet_filtered['jobcode_2'].apply(extract_project_no)
+    df_timesheet_filtered['Project No'] = df_timesheet_filtered['jobcode_2'].apply(extract_project_number)
     #cost_grouped = df_timesheet_filtered.groupby('Project No', as_index=False)['day_cost'].sum()
     cost_grouped = df_timesheet_filtered.groupby('Project No', as_index=False).agg({
         'day_cost': 'sum',
@@ -1604,7 +1604,7 @@ def update_service_item_table(selected_project_no, selected_years):
     
     # Create a new column "Project No" in merged timesheet data if not already present.
     if 'Project No' not in global_merged_df.columns:
-        #global_merged_df['Project No'] = global_merged_df['jobcode_2'].apply(extract_project_no)
+        #global_merged_df['Project No'] = global_merged_df['jobcode_2'].apply(extract_project_number)
         df_filtered = global_projects_df[global_projects_df['Project No'] == selected_project_no]
 
     
@@ -1774,7 +1774,7 @@ def update_jobcode_options(filter_clients, filter_type, filter_status, filter_se
             print("After PM filter:", len(filter_pm))
             
     #valid_projects = filtered_projects['Project No'].unique()
-    #valid_jobcodes = global_merged_df[global_merged_df['jobcode_2'].apply(lambda x: extract_project_no(x) in valid_projects)]
+    #valid_jobcodes = global_merged_df[global_merged_df['jobcode_2'].apply(lambda x: extract_project_number(x) in valid_projects)]
     #jobcode_values = valid_jobcodes['jobcode_2'].unique()
     #options = [{'label': jc, 'value': jc} for jc in sorted(jobcode_values)]
     
@@ -1794,7 +1794,7 @@ def update_award_date(selected_jobcode):
     if selected_jobcode is None:
         return ""
     
-    #extracted_code = extract_project_no(selected_jobcode)
+    #extracted_code = extract_project_number(selected_jobcode)
     #filtered = global_projects_df[global_projects_df['Project No'].str[:7] == extracted_code]
     filtered = global_projects_df[global_projects_df['Project No'] == selected_jobcode]
 
@@ -1903,7 +1903,7 @@ def update_project_tables(selected_jobcode):
     total_cost = 0
     df_filtered = global_merged_df[global_merged_df['Project No'] == str(selected_jobcode)]
     if df_filtered.empty:
-        df_filtered = global_merged_df[global_merged_df['jobcode_2'].astype(str).apply(lambda x: extract_project_no(x)) == str(selected_jobcode)]
+        df_filtered = global_merged_df[global_merged_df['jobcode_2'].astype(str).apply(lambda x: extract_project_number(x)) == str(selected_jobcode)]
     
     if not df_filtered.empty:
         total_cost = df_filtered['day_cost'].sum()
@@ -1966,7 +1966,7 @@ def update_project_description(selected_jobcode):
     if selected_jobcode is None:
         return ""
     
-    ##extracted_code = extract_project_no(selected_jobcode)
+    ##extracted_code = extract_project_number(selected_jobcode)
     #filtered = global_projects_df[global_projects_df['Project No'].str[:7] == extracted_code]
     #filtered = global_projects_df[global_projects_df['Project No'] == selected_project_no]
 
@@ -2485,7 +2485,10 @@ def generate_monthly_report(selected_date):
                 return float(cleaned)
             except:
                 return 0
-        return 0
+        # If it's already a number (int or float), return it directly
+        if isinstance(value, (int, float)):
+            return value
+        return 0 # For any other case, return 0
     
     # Calculate totals for numeric columns
     if report_data:

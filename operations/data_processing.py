@@ -4,7 +4,7 @@
 #validated
 ########################################################################
 ##Import libraries and locally defined functions
-from utility_funcs import print_green, print_cyan, print_orange, print_red, print_orange, standardize_project_no, sanitize_filename, extract_project_no
+from utility_funcs import print_green, print_cyan, print_orange, print_red, print_orange, standardize_project_no, sanitize_filename, extract_project_number
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
 ########################################################################
 import os
@@ -647,7 +647,9 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
             
             
             # Get total cost from timesheet data
-            project_costs = global_merged_df[global_merged_df['Project No'] == project_no]
+            #project_costs = global_merged_df[global_merged_df['Project No'] == project_no]
+            project_costs = global_merged_df[
+            global_merged_df['jobcode_2'].apply(extract_project_number) == project_no]
             total_cost = project_costs['day_cost'].sum() if not project_costs.empty else 0
 
             # Parse contracted amount
@@ -735,7 +737,11 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 invoiced_percent_num = None
                 invoiced_percent = None
 
-
+            # En data_processing.py, líneas ~740 (ANTES de crear project_record):
+            print(f"DEBUG FORECAST - Proyecto {project_no}:")
+            print(f"  projected_value = {projected_value}")
+            print(f"  actual_value = {actual_value}")  
+            print(f"  acummulative_value = {acummulative_value}")
             
             # Build the project record for the table
             project_record = {
@@ -749,13 +755,14 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Market Segment': extract_number_part(project_row.get('Market Segment', 'Unknown')),  
                 'Type': extract_number_part(project_row.get('Type', 'Unknown')),  
                 
-                       'Contracted Amount': contracted_amount if contracted_amount is not None else None,
+                'Contracted Amount': contracted_amount if contracted_amount is not None else None,
                 'Projected': projected_value if projected_value is not None else 0,
                 'Actual': actual_value if actual_value is not None else 0,
                 'Acummulative': acummulative_value if acummulative_value is not None else None,
                 'Monthly Invoice': actual_value if actual_value is not None else 0,  # Using actual_value for monthly invoice
                 'Total Invoice': total_invoice if total_invoice is not None else 0,
-                'Total Cost': total_cost if total_cost is not None else 0,                'Invoiced %': invoiced_percent if invoiced_percent is not None else 0,
+                'Total Cost': total_cost if total_cost is not None else 0,                
+                'Invoiced %': invoiced_percent if invoiced_percent is not None else 0,
                 'Invoiced %_num': invoiced_percent_num if invoiced_percent_num is not None else 0,
                 'ER Contract': er_contract if er_contract is not None else None,
                 'ER Invoiced': er_invoiced if er_invoiced is not None else None,
