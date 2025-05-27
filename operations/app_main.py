@@ -2435,6 +2435,28 @@ def generate_monthly_report(selected_date):
     if not report_data:
         return [], [], [], [], [], []
     
+    # Format 'Projected' and 'Actual' in each project row as currency
+    for row in report_data: # report_data is a list of dicts
+        if 'Projected' in row:
+            try:
+                # Ensure value is float before formatting
+                projected_val = float(row['Projected']) 
+                row['Projected'] = f"${projected_val:,.2f}"
+            except (ValueError, TypeError):
+                # If conversion fails or it's already formatted, keep original or set default
+                if not (isinstance(row['Projected'], str) and '$' in str(row['Projected'])):
+                    row['Projected'] = "$0.00"
+        
+        if 'Actual' in row:
+            try:
+                # Ensure value is float before formatting
+                actual_val = float(row['Actual']) 
+                row['Actual'] = f"${actual_val:,.2f}"
+            except (ValueError, TypeError):
+                # If conversion fails or it's already formatted, keep original or set default
+                if not (isinstance(row['Actual'], str) and '$' in str(row['Actual'])):
+                    row['Actual'] = "$0.00"
+    
     # Define which columns to display (customize this list as needed)
     visible_columns = [
         'Project No', 
