@@ -1033,7 +1033,7 @@ def calculate_day_cost(merged_df):
                 col_name = "2022Whole_Year"
             return row.get(col_name, 0) * row['hours']
 
-        # 3) If year == 2023, assume a single “2023Whole_Year” column
+        # 3) If year == 2023, assume a single "2023Whole_Year" column
         if year == 2023:
             col_name = "2023Whole_Year"
             return row.get(col_name, 0) * row['hours']
@@ -1216,6 +1216,19 @@ def main():
     df_projects = load_third_file_dynamic(project_log_path)
 
     # 7) Load Invoices data
+    df_invoices_2022 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2022', header=0, dtype={'Actual': str})
+    df_invoices_2022['Actual'] = (
+        df_invoices_2022['Actual'].astype(str)
+        .str.replace('$','', regex=False)
+        .str.replace(',','', regex=False)
+    )
+    
+
+    
+    
+    df_invoices_2022['Actual'] = pd.to_numeric(df_invoices_2022['Actual'], errors='coerce')
+    df_invoices_2022['Invoice_Year'] = 2022  # Add explicit year column based on sheet name
+
     df_invoices_2023 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2023', header=0, dtype={'Actual': str})
     df_invoices_2023['Actual'] = (
         df_invoices_2023['Actual'].astype(str)
@@ -1236,13 +1249,14 @@ def main():
     df_invoices_2025['Invoice_Year'] = 2025  # Add explicit year column based on sheet name
 
     # Possibly truncate each at 'TOTAL'
+    df_invoices_2022 = truncate_at_total(df_invoices_2022)
     df_invoices_2023 = truncate_at_total(df_invoices_2023)
     df_invoices_2024 = truncate_at_total(df_invoices_2024)
     df_invoices_2025 = truncate_at_total(df_invoices_2025)  # Now truncate 2025 data also
 
 
     # After loading all invoice dataframes
-    for df in [df_invoices_2023, df_invoices_2024, df_invoices_2025]:
+    for df in [df_invoices_2022, df_invoices_2023, df_invoices_2024, df_invoices_2025]:
         if 'Actual' in df.columns:
             df['Actual'] = (
                 df['Actual'].astype(str)
@@ -1262,21 +1276,24 @@ def main():
             return parts[-1]
         return parts[0] if parts else ""
 
+    df_invoices_2022['Invoice No'] = df_invoices_2022['Invoice No'].apply(keep_second_number)
     df_invoices_2023['Invoice No'] = df_invoices_2023['Invoice No'].apply(keep_second_number)
     df_invoices_2024['Invoice No'] = df_invoices_2024['Invoice No'].apply(keep_second_number)
     df_invoices_2025['Invoice No'] = df_invoices_2025['Invoice No'].apply(keep_second_number)
 
     # Convert 'Month' column to numeric in all dataframes
+    df_invoices_2022 = df_invoices_2022.copy()
     df_invoices_2023=df_invoices_2023.copy()
     #df_invoices_2024=df_invoices_2024.copy()
     #df_invoices_2025=df_invoices_2025.copy()
+    df_invoices_2022['Month_numeric'] = pd.to_numeric(df_invoices_2022['Month'], errors='coerce')
     df_invoices_2023['Month_numeric'] = pd.to_numeric(df_invoices_2023['Month'], errors='coerce')
     df_invoices_2024['Month_numeric'] = pd.to_numeric(df_invoices_2024['Month'], errors='coerce')
     df_invoices_2025['Month_numeric'] = pd.to_numeric(df_invoices_2025['Month'], errors='coerce')
 
     # Ensure consistent column names before concatenation
     required_columns = ['Project No', 'Month', 'Month_numeric', 'Invoice No', 'Invoice Date', 'Actual', 'Invoice_Year']
-    for df in [df_invoices_2023, df_invoices_2024, df_invoices_2025]:
+    for df in [df_invoices_2022, df_invoices_2023, df_invoices_2024, df_invoices_2025]:
         for col in required_columns:
             if col not in df.columns:
                 if col == 'Invoice_Year':  # Should already be added above, but just in case
@@ -1284,7 +1301,7 @@ def main():
                 df[col] = None
 
     # Concatenate all invoice dataframes
-    df_invoices = pd.concat([df_invoices_2023, df_invoices_2024, df_invoices_2025], ignore_index=True)
+    df_invoices = pd.concat([df_invoices_2022, df_invoices_2023, df_invoices_2024, df_invoices_2025], ignore_index=True)
     print_green("DEBUG: Combined df_invoices shape -> " + str(df_invoices.shape))
     print_green("DEBUG: Combined df_invoices columns -> " + str(df_invoices.columns.tolist()))
 

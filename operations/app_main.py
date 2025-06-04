@@ -226,7 +226,32 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                         # Hide header cells for Value_num
                         style_header_conditional=[{'if': {'column_id': 'Value_num'},'display': 'none'}],
                         #style_data_conditional=config.RIGHT_TABLE_RED_STYLE,
-                        style_data_conditional=config.DATA_CONDITIONAL_ER,
+                        style_data_conditional=config.DATA_CONDITIONAL_ER + [
+                            {
+                                'if': {
+                                    'filter_query': '{Value_num} < 1 && {Field} = "ER DECON LLC"',
+                                    'column_id': 'Value'
+                                },
+                                'color': 'red',
+                                'fontWeight': 'bold'
+                            },
+                            {
+                                'if': {
+                                    'filter_query': '{Value_num} >= 1 && {Value_num} <= 2.5 && {Field} = "ER DECON LLC"',
+                                    'column_id': 'Value'
+                                },
+                                'color': 'orange',
+                                'fontWeight': 'bold'
+                            },
+                            {
+                                'if': {
+                                    'filter_query': '{Value_num} > 2.5 && {Field} = "ER DECON LLC"',
+                                    'column_id': 'Value'
+                                },
+                                'color': 'green',
+                                'fontWeight': 'bold'
+                            }
+                        ],
                         style_table=config.TABLE_STYLE,
                         style_cell=config.TABLE_CELL_STYLE,
                         #style_cell_conditional=config.TABLE_CELL_CONDITIONAL,
@@ -727,13 +752,63 @@ def update_report_bar_chart(selected_date):
         global_raw_invoices,
         project_log_path
     )
+    
+    # Handle empty report_data or missing 'Type' column
+    if not report_data:
+        fig = go.Figure()
+        fig.update_layout(
+            title='Projected vs Actual by Project Type',
+            title_x=0.5,
+            xaxis_title='Project Type',
+            yaxis_title='Amount (USD)',
+            annotations=[dict(text="No data available for the selected period.", showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5)]
+        )
+        return fig
+
     df = pd.DataFrame(report_data)
+
+    if 'Type' not in df.columns or df.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title='Projected vs Actual by Project Type',
+            title_x=0.5,
+            xaxis_title='Project Type',
+            yaxis_title='Amount (USD)',
+            annotations=[dict(text="No 'Type' data available for charting.", showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5)]
+        )
+        return fig
+        
     # drop the TOTAL row if you included it in report_data
     df = df[df['Type'] != 'TOTAL']
 
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title='Projected vs Actual by Project Type',
+            title_x=0.5,
+            xaxis_title='Project Type',
+            yaxis_title='Amount (USD)',
+            annotations=[dict(text="No data to display after filtering TOTAL.", showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5)]
+        )
+        return fig
+
     # 2) parse currency strings into floats
     def to_num(x):
-        return float(str(x).replace('$','').replace(',','')) if isinstance(x, str) else float(x)
+        return float(str(x).replace('$','').replace(',','')) if isinstance(x, str) and x not in ['N/A', ''] else (float(x) if isinstance(x, (int, float)) else 0.0)
+
+    # Check if essential columns for plotting exist
+    required_plot_cols = ['Type', 'Projected', 'Actual']
+    if not all(col in df.columns for col in required_plot_cols):
+        missing_cols_str = ", ".join([col for col in required_plot_cols if col not in df.columns])
+        fig = go.Figure()
+        fig.update_layout(
+            title='Projected vs Actual by Project Type',
+            title_x=0.5,
+            xaxis_title='Project Type',
+            yaxis_title='Amount (USD)',
+            annotations=[dict(text=f"Missing required columns for chart: {missing_cols_str}", showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5)]
+        )
+        return fig
 
     types   = df['Type'].tolist()
     projected = df['Projected'].map(to_num).tolist()
@@ -797,7 +872,7 @@ def update_date_display(selected_date):
         State("service-item-table", "data"),
         State("invoice-table", "data"),
         State("jobcode-dropdown", "value"),
-        State("yeare-dropdown", "value"),
+        State("year-dropdown", "value"),
     ],
     prevent_initial_call=True
 )
@@ -905,7 +980,7 @@ def export_dashboard_pdf(n_clicks, left_data, right_data, service_data, invoice_
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            font-size: 9px;
+            font-size: 8px;
           }}
           table {{
             width: 90%;          /* REDUCED from 98% to 90% */
@@ -963,6 +1038,7 @@ def export_client_pdf(n_clicks, selected_client, start_date, end_date):
         ]
     invoices_grouped = df_invoices_filtered.groupby('Project No', as_index=False)['Actual'].sum()
     invoices_grouped.rename(columns={'Actual': 'InvoiceNum'}, inplace=True)
+    
     
     # 3. Filter timesheet data by the same date range.
     df_timesheet_filtered = global_merged_df.copy()
@@ -1872,65 +1948,78 @@ def update_project_tables(selected_jobcode):
             {"Field": "Contracted Amount", "Value": "Data not found", "Value_num": 0},
             {"Field": "Total Invoice", "Value": "Data not found", "Value_num": 0}, 
             {"Field": "Total Cost", "Value": "Data not found", "Value_num": 0},
-            {"Field": "ER Contract", "Value": "Data not found", "Value_num": 0}
+            {"Field": "ER Contract", "Value": "Data not found", "Value_num": 0},
+            {"Field": "ER DECON LLC", "Value": "Data not found", "Value_num": 0}
         ]
         
         left_columns = [{"name": "Field", "id": "Field"}, {"name": "Value", "id": "Value"}]
         right_columns = [
             {"name": "Field", "id": "Field"},
             {"name": "Value", "id": "Value"},
-            {"name": "Value_num", "id": "Value_num", "type": "numeric", "hidden": True}
+            {"name": "Value_num", "id": "Value_num", "type": "numeric"}#, "hidden": True}
         ]
         
         return left_data, left_columns, right_table_data, right_columns
     
     # We found a match, proceed with creating the tables
-    project_record = filtered.iloc[0]
-    print(f"Found project: {project_record['Project No']}")
+    project_record_series = filtered.iloc[0]
+    print(f"Found project: {project_record_series['Project No']}")
     
     # Create the left table data (Project Details)
     left_fields = ['Project No', 'Clients', 'Type', 'Status', 'Service Line', 'Market Segment', 'PM', 'TL']
     left_data = []
     
     for field in left_fields:
-        if field in project_record and pd.notna(project_record[field]):
+        if field in project_record_series and pd.notna(project_record_series[field]):
             left_data.append({
                 'Field': field,
-                'Value': str(project_record[field])
+                'Value': str(project_record_series[field])
             })
     
     # Process cost data
     total_cost = 0
-    df_filtered = global_merged_df[global_merged_df['Project No'] == str(selected_jobcode)]
-    if df_filtered.empty:
-        df_filtered = global_merged_df[global_merged_df['jobcode_2'].astype(str).apply(lambda x: extract_project_number(x)) == str(selected_jobcode)]
-    
-    if not df_filtered.empty:
-        total_cost = df_filtered['day_cost'].sum()
+    # Ensure selected_jobcode is treated as a string for filtering in global_merged_df
+    # as 'Project No' in global_merged_df might have been standardized or derived differently.
+    # It's safer to rely on extract_project_number for jobcode_2 if that's the primary link.
+    df_timesheet_filtered = global_merged_df[global_merged_df['jobcode_2'].astype(str).apply(extract_project_number) == standardize_project_no(str(selected_jobcode))]
+    if df_timesheet_filtered.empty:
+         # Fallback: Try direct match on 'Project No' if it exists and was reliably created
+        if 'Project No' in global_merged_df.columns:
+            df_timesheet_filtered = global_merged_df[global_merged_df['Project No'].astype(str).str.strip() == str(selected_jobcode).strip()]
+
+    if not df_timesheet_filtered.empty:
+        total_cost = df_timesheet_filtered['day_cost'].sum()
     
     # Get invoice data
     total_invoice = 0
     if 'Project No' in global_raw_invoices.columns:
-        df_invoices = global_raw_invoices[global_raw_invoices['Project No'].astype(str).str.strip() == str(selected_jobcode).strip()]
+        # Standardize both sides of the comparison for robustness
+        df_invoices = global_raw_invoices[global_raw_invoices['Project No'].astype(str).str.strip().apply(standardize_project_no) == standardize_project_no(str(selected_jobcode).strip())]
         if not df_invoices.empty and 'Actual' in df_invoices.columns:
-            total_invoice = df_invoices['Actual'].sum()
+            # Ensure 'Actual' is numeric before summing
+            total_invoice = pd.to_numeric(df_invoices['Actual'], errors='coerce').sum()
     
     # Get contracted amount
     contracted_amount = None
-    if 'Contracted Amount' in project_record and pd.notna(project_record['Contracted Amount']):
+    if 'Contracted Amount' in project_record_series and pd.notna(project_record_series['Contracted Amount']):
         try:
-            if isinstance(project_record['Contracted Amount'], str):
-                contracted_amount = float(project_record['Contracted Amount'].replace('$', '').replace(',', ''))
+            if isinstance(project_record_series['Contracted Amount'], str):
+                contracted_amount = float(project_record_series['Contracted Amount'].replace('$', '').replace(',', ''))
             else:
-                contracted_amount = float(project_record['Contracted Amount'])
+                contracted_amount = float(project_record_series['Contracted Amount'])
         except:
             contracted_amount = None
     
     # Calculate derived values
-    remaining_to_invoice = contracted_amount - total_invoice if contracted_amount is not None and total_invoice > 0 else None
+    remaining_to_invoice = contracted_amount - total_invoice if contracted_amount is not None and total_invoice is not None else None
     er_contract = contracted_amount / total_cost if total_cost > 0 and contracted_amount is not None else None
-    er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice > 0 else None
+    er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice is not None and total_invoice > 0 else None
     
+    # Calculate ER DECON LLC
+    # Standardize selected_jobcode before passing to calculate_new_er
+    standardized_selected_jobcode = standardize_project_no(str(selected_jobcode))
+    er_decon_llc = calculate_new_er(global_projects_df, standardized_selected_jobcode, global_merged_df)
+
     # Format values
     format_money = lambda x: f"${x:,.2f}" if x is not None else "N/A"
     format_er = lambda x: f"{x:.2f}" if x is not None else "N/A"
@@ -1938,11 +2027,12 @@ def update_project_tables(selected_jobcode):
     # Create right table
     right_table_data = [
         {"Field": "Contracted Amount", "Value": format_money(contracted_amount), "Value_num": contracted_amount or 0},
-        {"Field": "Total Invoice", "Value": format_money(total_invoice), "Value_num": total_invoice},
-        {"Field": "Total Cost", "Value": format_money(total_cost), "Value_num": total_cost},
+        {"Field": "Total Invoice", "Value": format_money(total_invoice), "Value_num": total_invoice or 0},
+        {"Field": "Total Cost", "Value": format_money(total_cost), "Value_num": total_cost or 0},
         {"Field": "Remaining to Invoice", "Value": format_money(remaining_to_invoice), "Value_num": remaining_to_invoice or 0},
         {"Field": "ER Contract", "Value": format_er(er_contract), "Value_num": er_contract or 0},
-        {"Field": "ER Invoiced", "Value": format_er(er_invoiced), "Value_num": er_invoiced or 0}
+        {"Field": "ER Invoiced", "Value": format_er(er_invoiced), "Value_num": er_invoiced or 0},
+        {"Field": "ER DECON LLC", "Value": format_er(er_decon_llc), "Value_num": er_decon_llc or 0}
     ]
     
     # Define columns
@@ -2037,19 +2127,19 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
         <style>
           @page {{
             size: letter landscape; /* US Letter in landscape orientation */
-            margin-left: 2cm;     /* INCREASED from 0.75cm to 2cm */
-            margin-right: 2cm;    /* INCREASED from 0.75cm to 2cm */
-            margin-top: 1.5cm;    /* INCREASED from 1cm */
-            margin-bottom: 1.5cm; /* INCREASED from 1cm */
+            margin-left: 1.5cm;     /* INCREASED from 0.75cm to 2cm */
+            margin-right: 1.5cm;    /* INCREASED from 0.75cm to 2cm */
+            margin-top: 1cm;    /* INCREASED from 1cm */
+            margin-bottom: 1cm; /* INCREASED from 1cm */
           }}
           body {{
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            font-size: 9px;
+            font-size: 8px;
           }}
           table {{
-            width: 90%;          /* REDUCED from 98% to 90% */
+            width: 98%;         
             border-collapse: collapse;
             table-layout: fixed;
             margin: 0 auto;      /* Centers the table */
@@ -2057,7 +2147,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
           }}
           th, td {{
             border: 1px solid black;
-            padding: 3px 4px; /* Adjusted padding for better spacing */
+            padding: 1px 2px; /* Adjusted padding for better spacing */
             text-align: center; /* Default alignment is center */
             word-wrap: break-word;
             overflow: hidden;
@@ -2080,7 +2170,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
           .er-mid {{ color: orange; font-weight: bold; }}
           .er-high {{ color: green; font-weight: bold; }}
           .logo-container {{ text-align: center; margin-bottom: 10px; }}
-          .forecast-table {{ margin-bottom: 20px; }}
+          .forecast-table {{ margin-bottom: 15px; }}
           .forecast-value {{ color: black; }}
           .forecast-percentage {{ font-weight: bold; }}
           .forecast-percentage-low {{ color: red; font-weight: bold; }}
@@ -2090,7 +2180,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
       </head>
       <body>
         <div class="logo-container">
-          <img src="data:image/png;base64,{config.encoded_logo}" style="height: 70px;">
+          <img src="data:image/png;base64,{config.encoded_logo}" style="height: 40px;">
         </div>
         <h1>Monthly Invoice Report</h1>
         <h2>{month_name} {year}- Week {week_of_month}</h2>
@@ -2122,7 +2212,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
         
         # Custom HTML table with formatting
         html_string += f"<h3>Monthly Invoice Report</h3>"
-        html_string += f"<table border='1' cellspacing='0' cellpadding='1' style='width: 90%; margin: 0 auto;'><thead><tr>"
+        html_string += f"<table border='1' cellspacing='0' cellpadding='1' style='width: 98%; margin: 0 auto;'><thead><tr>"
         for col in columns:
             col_id = col['id']
             col_name = col['name'] if 'name' in col else col_id
@@ -2362,7 +2452,7 @@ def export_weekly_report_pdf(n_clicks, table_data, table_columns, forecast_summa
                 legend=dict(
                     yanchor="top",
                     y=0.99,
-                    xanchor="right",
+                    xanchor="left",
                     x=0.99
                 )
             )
