@@ -939,7 +939,7 @@ def export_dashboard_excel(n_clicks, left_data, right_data, service_data, invoic
         State("service-item-table", "data"),
         State("invoice-table", "data"),
         State("jobcode-dropdown", "value"),  
-        State("years-dropdown", "value")
+        State("year-dropdown", "value")
     ],
     prevent_initial_call=True
 )
