@@ -163,7 +163,7 @@ def get_project_log_data(years=[2023, 2024, 2025]):
             sheet_name = f"5_Invoice-{year}"
             
             print_green(f"Attempting to load project log from: {project_log_path}, sheet: {sheet_name}")
-            df_projects = pd.read_excel(project_log_path, sheet_name=sheet_name, engine='openpyxl')
+            df_projects = pd.read_excel(project_log_path, sheet_name=sheet_name, engine='openpyxl', dtype={'Project No': str, 'Project No.': str})
             print_green(f"Successfully loaded sheet {sheet_name} with {len(df_projects)} rows")
             
             # Add a Year column to identify the source
@@ -543,7 +543,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
 
     try:
         # Read the selected sheet from the project log
-        df_sheet = pd.read_excel(project_log_path, sheet_name=sheet_name)
+        df_sheet = pd.read_excel(project_log_path, sheet_name=sheet_name, dtype={'Project No': str, 'Project No.': str})
         print_green(f"Successfully loaded sheet {sheet_name} from project log")
         print_green(f"Sheet columns: {df_sheet.columns.tolist()}")
 
@@ -621,8 +621,8 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 if 'Invoice No' in project_invoices.columns:
                     # Group by invoice number and take the latest version of each invoice
                     latest_invoices = project_invoices.groupby('Invoice No', as_index=False).last()
-                    total_invoice = latest_invoices['Actual'].sum()
                     print(f"DEBUG: Using {len(latest_invoices)} unique invoices after removing duplicates")
+                    total_invoice = latest_invoices['Actual'].sum()
                 else:
                     # If no invoice number, use all entries (original behavior)
                     total_invoice = project_invoices['Actual'].sum()
@@ -728,14 +728,23 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                         acummulative_value = float(acummulative_value) if pd.notnull(acummulative_value) else None
                     except:
                         acummulative_value = None
-                        # Calculate Invoiced Percentage (total_invoice / contracted_amount)
-            # Store both numeric and formatted versions of invoiced_percent
-            if contracted_amount and total_invoice:
-                invoiced_percent_num = (total_invoice / contracted_amount * 100)
-                invoiced_percent = f"{invoiced_percent_num:.1f}%"  # Formatted for display
-            else:
-                invoiced_percent_num = None
-                invoiced_percent = None
+            
+            # Calculate Invoiced Percentage (total_invoice / contracted_amount)
+            if contracted_amount is not None and contracted_amount > 0:
+                if total_invoice is not None and total_invoice >= 0:
+                    invoiced_percent_num = (total_invoice / contracted_amount) * 100
+                    invoiced_percent = f"{invoiced_percent_num:.1f}%"
+                else: # No invoice info
+                    invoiced_percent_num = 0
+                    invoiced_percent = "0.0%"
+            else: # No contracted amount
+                if total_invoice is not None and total_invoice > 0:
+                    invoiced_percent_num = -1  # Sentinel for N/A
+                    invoiced_percent = "N/A"
+                else: # No invoice and no contract
+                    invoiced_percent_num = 0
+                    invoiced_percent = "0.0%"
+
 
             # En data_processing.py, líneas ~740 (ANTES de crear project_record):
             print(f"DEBUG FORECAST - Proyecto {project_no}:")
@@ -762,8 +771,8 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Monthly Invoice': actual_value if actual_value is not None else 0,  # Using actual_value for monthly invoice
                 'Total Invoice': total_invoice if total_invoice is not None else 0,
                 'Total Cost': total_cost if total_cost is not None else 0,                
-                'Invoiced %': invoiced_percent if invoiced_percent is not None else 0,
-                'Invoiced %_num': invoiced_percent_num if invoiced_percent_num is not None else 0,
+                'Invoiced %': invoiced_percent,
+                'Invoiced %_num': invoiced_percent_num,
                 'ER Contract': er_contract if er_contract is not None else None,
                 'ER Invoiced': er_invoiced if er_invoiced is not None else None,
                 'ER DECON LLC': new_er if new_er is not None else None,
@@ -809,16 +818,6 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                     # For all other cases with worked hours but no calculated value
                     project_record['DECON LLC Invoiced'] = "0.00"
 
-            # Add Original_Order for sorting if available
-            original_order_values = df_month.loc[
-                df_month[project_column].apply(lambda x: standardize_project_no(str(x)) == project_no), 
-                'Original_Order'
-            ]
-            if not original_order_values.empty:
-                project_record['Original_Order'] = original_order_values.values[0]
-            else:
-                project_record['Original_Order'] = 999  # Default high value for sorting
-
             active_project_details.append(project_record)
 
         # If no valid projects found, return empty data
@@ -855,9 +854,61 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
         print_red(traceback.format_exc())
         return [], []
 
+def handle_duplicate_projects(df_projects):
+    """
+    Identifies projects with the same Project No but different descriptions,
+    and merges them.
+    - Descriptions are concatenated.
+    - Contracted Amounts are summed.
+    - For other columns, the values from the first occurrence are taken.
+    """
+    print_green("Checking for duplicate project numbers...")
+    
+    # Standardize Project No before checking for duplicates
+    df_projects['Project No'] = df_projects['Project No'].astype(str).str.strip().apply(standardize_project_no)
+    
+    # Find project numbers that are duplicated
+    duplicated_project_nos = df_projects[df_projects.duplicated(subset=['Project No'], keep=False)]['Project No'].unique()
+    
+    if len(duplicated_project_nos) == 0:
+        print_green("No duplicate project numbers found.")
+        return df_projects
 
+    print_orange(f"Found {len(duplicated_project_nos)} project numbers with duplicates. Merging them...")
 
+    merged_rows = []
+    
+    for project_no in duplicated_project_nos:
+        subset = df_projects[df_projects['Project No'] == project_no]
+        
+        # Merge descriptions
+        unique_descriptions = subset['Project Description'].unique()
+        merged_description = ' / '.join(sorted([desc for desc in unique_descriptions if pd.notna(desc)]))
+        
+        # Create a new merged row. For other columns, we can take the first entry's value.
+        new_row = subset.iloc[0].copy()
+        new_row['Project Description'] = merged_description
+        
+        # Sum 'Contracted Amount'
+        contracted_amounts = pd.to_numeric(subset['Contracted Amount'], errors='coerce').fillna(0)
+        new_row['Contracted Amount'] = contracted_amounts.sum()
+        
+        merged_rows.append(new_row)
 
+    # Create a dataframe from the merged rows
+    if merged_rows:
+        merged_df = pd.DataFrame(merged_rows)
+    else:
+        merged_df = pd.DataFrame()
+
+    # Get the original dataframe without the duplicated project numbers
+    df_no_duplicates = df_projects[~df_projects['Project No'].isin(duplicated_project_nos)].copy()
+    
+    # Concatenate the two dataframes
+    final_df = pd.concat([df_no_duplicates, merged_df], ignore_index=True)
+    
+    print_green(f"Finished merging {len(duplicated_project_nos)} duplicate project groups.")
+    return final_df
 
 # ==============================
 # RATES SHEET INGESTION FUNCTIONS
@@ -1090,21 +1141,24 @@ def assign_total_hours(merged_df):
 
 
 def truncate_at_total(df):
+    """
+    Truncates the DataFrame to keep only rows with valid month data.
+    It assumes the first column contains month information.
+    """
     df_copy = df.copy()
     
-    # Fill NA values appropriately by dtype
-    for col in df_copy.columns:
-        if df_copy[col].dtype == 'object':  # String columns
-            df_copy[col] = df_copy[col].fillna("")
-        else:  # Numeric or other columns
-            df_copy[col] = df_copy[col].fillna(0)
-    
-    for i in range(len(df_copy)):
-        row_str = " ".join([str(x) for x in df_copy.iloc[i].values])
-        if "TOTAL" in row_str.upper():
-            return df_copy.iloc[:i].copy()
-    return df_copy
+    if df_copy.empty:
+        return df_copy
 
+    # Get the name of the first column, which is assumed to be the 'Month' column
+    month_col_name = df_copy.columns[0]
+    
+    # Keep rows where the 'Month' column can be converted to a numeric value.
+    # This effectively filters out rows with non-numeric or empty month values,
+    # such as summary rows at the end of the sheet.
+    df_copy = df_copy[pd.to_numeric(df_copy[month_col_name], errors='coerce').notna()]
+    
+    return df_copy
 
 # ==============================
 # MAIN PIPELINE
@@ -1214,9 +1268,10 @@ def main():
     # 6) Load Project data
     project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
     df_projects = load_third_file_dynamic(project_log_path)
+    df_projects = handle_duplicate_projects(df_projects)
 
     # 7) Load Invoices data
-    df_invoices_2022 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2022', header=0, dtype={'Actual': str})
+    df_invoices_2022 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2022', header=0, dtype={'Actual': str, 'Project No': str})
     df_invoices_2022['Actual'] = (
         df_invoices_2022['Actual'].astype(str)
         .str.replace('$','', regex=False)
@@ -1229,7 +1284,7 @@ def main():
     df_invoices_2022['Actual'] = pd.to_numeric(df_invoices_2022['Actual'], errors='coerce')
     df_invoices_2022['Invoice_Year'] = 2022  # Add explicit year column based on sheet name
 
-    df_invoices_2023 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2023', header=0, dtype={'Actual': str})
+    df_invoices_2023 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2023', header=0, dtype={'Actual': str, 'Project No': str})
     df_invoices_2023['Actual'] = (
         df_invoices_2023['Actual'].astype(str)
         .str.replace('$','', regex=False)
@@ -1242,10 +1297,10 @@ def main():
     df_invoices_2023['Actual'] = pd.to_numeric(df_invoices_2023['Actual'], errors='coerce')
     df_invoices_2023['Invoice_Year'] = 2023  # Add explicit year column based on sheet name
 
-    df_invoices_2024 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2024', header=0).copy()
+    df_invoices_2024 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2024', header=0, dtype={'Project No': str}).copy()
     df_invoices_2024['Invoice_Year'] = 2024  # Add explicit year column based on sheet name
 
-    df_invoices_2025 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2025', header=0).copy()
+    df_invoices_2025 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2025', header=0, dtype={'Project No': str}).copy()
     df_invoices_2025['Invoice_Year'] = 2025  # Add explicit year column based on sheet name
 
     # Possibly truncate each at 'TOTAL'
@@ -1257,6 +1312,8 @@ def main():
 
     # After loading all invoice dataframes
     for df in [df_invoices_2022, df_invoices_2023, df_invoices_2024, df_invoices_2025]:
+        if 'Project No' in df.columns:
+            df['Project No'] = df['Project No'].astype(str)
         if 'Actual' in df.columns:
             df['Actual'] = (
                 df['Actual'].astype(str)
@@ -1351,29 +1408,11 @@ def main():
     # Print final shape
     print_green("Final merged_df shape -> " + str(merged_df.shape))
 
-    # Possibly check a sample for older projects
-    # e.g. 1871 or 1872
-    # debug_1871 = merged_df[merged_df['jobcode_2'].str.contains('1871', na=False)]
-    # print_cyan("DEBUG: 1871 sample ->\n"+str(debug_1871[['Employee','hours','day_cost','local_date']].head(20)))
-
     # Return for pickling
-    # Return for pickling - add the most_recent_date 
     last_update = pd.to_datetime('today').strftime('%Y-%m-%d')
     last_data_update = most_recent_date.strftime('%Y-%m-%d') if most_recent_date else "Unknown"
     print_orange(">>> Finished main() and returning data now.")
     return merged_df, df_projects, global_invoices, raw_invoices, last_update, last_data_update
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 last_update = pd.to_datetime('today').strftime('%Y-%m-%d')
