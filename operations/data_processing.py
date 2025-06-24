@@ -15,6 +15,7 @@ import pandas as pd
 import warnings
 from datetime import datetime
 import glob
+from openpyxl import load_workbook
 #######################################################################
 #file paths
 project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
@@ -47,17 +48,10 @@ def load_third_file_dynamic(third_file):
     df_raw = pd.read_excel(third_file, sheet_name='4_Contracted Projects', header=None, engine='openpyxl')
     print_cyan("Shape of raw projects sheet: " + str(df_raw.shape))
 
-    nrows = len(df_raw)
-    end_row = None
-    for i in range(688, nrows - 1):
-        if pd.isna(df_raw.iloc[i, 1]) and pd.isna(df_raw.iloc[i+1, 1]):
-            end_row = i
-            break
-    if end_row is None:
-        end_row = nrows
-
-    df_trunc = df_raw.iloc[:end_row].copy()
-    print_orange("Shape after truncation: " + str(df_trunc.shape))
+    # The previous hardcoded truncation was faulty. 
+    # We will load the entire sheet and let a more robust function handle cleanup.
+    df_trunc = df_raw.copy()
+    print_orange("Shape after initial load (no truncation): " + str(df_trunc.shape))
 
     header = [str(col).strip() for col in df_trunc.iloc[0].tolist()]
     df_data = df_trunc.iloc[1:].copy()
@@ -1142,21 +1136,16 @@ def assign_total_hours(merged_df):
 
 def truncate_at_total(df):
     """
-    Truncates the DataFrame to keep only rows with valid month data.
-    It assumes the first column contains month information.
+    Truncates the DataFrame to keep only rows with a valid Project Number.
     """
     df_copy = df.copy()
     
-    if df_copy.empty:
+    if df_copy.empty or 'Project No' not in df_copy.columns:
         return df_copy
 
-    # Get the name of the first column, which is assumed to be the 'Month' column
-    month_col_name = df_copy.columns[0]
-    
-    # Keep rows where the 'Month' column can be converted to a numeric value.
-    # This effectively filters out rows with non-numeric or empty month values,
-    # such as summary rows at the end of the sheet.
-    df_copy = df_copy[pd.to_numeric(df_copy[month_col_name], errors='coerce').notna()]
+    # Keep rows where 'Project No' is not null or empty.
+    # This is a more reliable way to identify valid data rows than checking the 'Month'.
+    df_copy.dropna(subset=['Project No'], inplace=True)
     
     return df_copy
 
@@ -1225,15 +1214,6 @@ def main():
     df_new['lname'] = df_new['lname'].astype(str).str.replace('Ã±', 'n', regex=False)
     df_new['full_name'] = df_new['fname'].str.strip() + " " + df_new['lname'].str.strip()
 
-    # For rows where number=0, map from full_name -> ID#
-    mask_zero = (df_new['number'] == 0)
-    df_new.loc[mask_zero, 'number'] = (
-        df_new.loc[mask_zero, 'full_name']
-        .map(mapping)
-        .fillna(0)
-        .astype(int)
-    )
-
     # Build 'correct_number' from 'number'
     df_new['correct_number'] = df_new['number']
     # If still 0, try again (some older names might not be in mapping):
@@ -1245,7 +1225,7 @@ def main():
         .astype(int)
     )
 
-    print_green("DEBUG: Head of df_new after filling zero IDs:\n" + str(df_new.head(10)))
+    print_green("DEBUG: Head of df_new after filling zero IDs:\\n" + str(df_new.head(10)))
 
     # 5) Merge timesheet + rates => merged_df
     merged_df = pd.merge(
@@ -1269,6 +1249,18 @@ def main():
     project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
     df_projects = load_third_file_dynamic(project_log_path)
     df_projects = handle_duplicate_projects(df_projects)
+
+    # Fill NaN values in key categorical columns to prevent them from being dropped by filters.
+    # This is the fix for projects disappearing when filters are applied.
+    columns_to_fill = ['Status', 'Type', 'Service Line', 'Market Segment', 'Clients', 'PM']
+    for col in columns_to_fill:
+        if col in df_projects.columns:
+            df_projects[col].fillna('Not Assigned', inplace=True)
+            
+    print_green("Filled NaN values in key project columns.")
+
+    # Sort the projects by the original order
+    df_projects = df_projects.sort_index()
 
     # 7) Load Invoices data
     df_invoices_2022 = pd.read_excel(project_log_path, sheet_name='5_Invoice-2022', header=0, dtype={'Actual': str, 'Project No': str})

@@ -40,63 +40,26 @@ try:
 except FileNotFoundError:
     last_data_update = "Unknown"
 
-"""
-def get_week_in_month(date_obj):
-
-Return a consistent week number within a month.
-All dates in the same week will have the same week number,
-even if they span across two months.
-
-# Get the Monday of the current week
-monday_of_week = date_obj - pd.Timedelta(days=date_obj.weekday())
-
-# Use the Monday's month to determine which month this week belongs to
-week_month = monday_of_week.month
-week_year = monday_of_week.year
-
-# If the date is in a different month than the Monday,
-# we'll still use the Monday's month for consistency
-if date_obj.month != week_month:
-    # The date is in the next month, but belongs to the previous month's week
-    # We'll get the week number from the Monday
-    first_day = monday_of_week.replace(day=1)
-    days_since_month_start = (monday_of_week - first_day).days
-    return days_since_month_start // 7 + 1
-else:
-    # Normal case: date is in the same month as the Monday of its week
-    first_day = date_obj.replace(day=1)
-    first_monday = first_day
-    while first_monday.weekday() != 0:  # Monday is 0
-        first_monday += pd.Timedelta(days=1)
-    
-    # Calculate the week number (1-based)
-    days_since_first_monday = (date_obj - first_monday).days
-    return days_since_first_monday // 7 + 1
-"""
-
-
-
-def conditional_extract_project_number(row):
+def get_correct_project_no(row, extractor):
     """
-    If jobcode_2 starts with '1928', use the first 7 characters of jobcode_3;
-    otherwise, use the first 7 characters of jobcode_2.
+    Extracts the project number by first checking jobcode_3, then falling back to jobcode_2.
+    This handles cases like '1928' where the specific project is in jobcode_3, 
+    and cases like '1787' where it's in jobcode_2.
     """
-    jc2 = str(row.get('jobcode_2', '')).strip()
-    jc3 = str(row.get('jobcode_3', '')).strip()
-    
-    if jc2.startswith("1928"):
-        # For all 1928* jobcodes in jobcode_2, use jobcode_3's first 7 characters
-        return jc3[:7].strip()
-    else:
-        # Otherwise, just use jobcode_2's first 7
-        return jc2[:7].strip()
+    jc3 = str(row.get('jobcode_3', ''))
+    jc2 = str(row.get('jobcode_2', ''))
 
-#################################################################################################################
-#create new id for all project storage
-#if 'Project No' not in global_merged_df.columns:
-#    global_merged_df['Project No'] = global_merged_df.apply(conditional_extract_project_number, axis=1)
-    
-global_merged_df['Project No'] = global_merged_df.apply(conditional_extract_project_number, axis=1)
+    # Try to extract from jobcode_3 first
+    proj_no_from_jc3 = extractor(jc3)
+    if proj_no_from_jc3:
+        return proj_no_from_jc3
+
+    # If not found in jc3, extract from jobcode_2
+    proj_no_from_jc2 = extractor(jc2)
+    return proj_no_from_jc2
+
+# Apply the robust project number extraction logic
+global_merged_df['Project No'] = global_merged_df.apply(get_correct_project_no, extractor=extract_project_number, axis=1)
 
 #import last update date for display on dash
 with open(os.path.join(PICKLE_OUTPUT_DIR, "last_update.txt"), "r") as f:
@@ -1814,12 +1777,13 @@ def update_jobcode_options(filter_clients, filter_type, filter_status, filter_se
     filtered_projects = global_projects_df.copy()
     
     if not any([filter_clients, filter_type, filter_status, filter_service, filter_market, filter_pm]):
-        pass
         if 'Award Date' in filtered_projects.columns:
             # Convert to datetime (if not already)
             filtered_projects['Award Date'] = pd.to_datetime(filtered_projects['Award Date'], errors='coerce')
+            # Filter by award date but INCLUDE projects with missing award dates
             filtered_projects = filtered_projects[
-                filtered_projects['Award Date'].dt.year.isin(range(2016, 2030))
+                (filtered_projects['Award Date'].dt.year.isin(range(2016, 2030))) |
+                (filtered_projects['Award Date'].isna())
             ]
     else:
     
@@ -1855,10 +1819,8 @@ def update_jobcode_options(filter_clients, filter_type, filter_status, filter_se
     #options = [{'label': jc, 'value': jc} for jc in sorted(jobcode_values)]
     
     
-    project_nos = sorted(filtered_projects['Project No'].unique())
+    project_nos = sorted(filtered_projects['Project No'].astype(str).unique())
     options = [{'label': pn, 'value': pn} for pn in project_nos]
-    print_green("All project options:")
-    print_green(options)
     
     return options
 #################################################################################################################
