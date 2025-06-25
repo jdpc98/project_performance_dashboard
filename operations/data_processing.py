@@ -883,8 +883,20 @@ def handle_duplicate_projects(df_projects):
         new_row = subset.iloc[0].copy()
         new_row['Project Description'] = merged_description
         
-        # Sum 'Contracted Amount'
-        contracted_amounts = pd.to_numeric(subset['Contracted Amount'], errors='coerce').fillna(0)
+        # Sum 'Contracted Amount' - handle currency formatting
+        def parse_currency(amount):
+            if pd.isna(amount) or amount == '':
+                return 0.0
+            if isinstance(amount, (int, float)):
+                return float(amount)
+            # Remove currency symbols and commas, then convert to float
+            amount_str = str(amount).replace('$', '').replace(',', '').strip()
+            try:
+                return float(amount_str)
+            except (ValueError, TypeError):
+                return 0.0
+        
+        contracted_amounts = subset['Contracted Amount'].apply(parse_currency)
         new_row['Contracted Amount'] = contracted_amounts.sum()
         
         merged_rows.append(new_row)
