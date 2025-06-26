@@ -1569,7 +1569,7 @@ def update_client_summary(selected_client, start_date, end_date):
     #prepare final cols for project summary table 
     
     detail_cols = ['Project No', 'Status', 'Type', 'Market Segment', 'Contracted Amount',
-                   'Total Invoice', 'Total Cost', 'Total Hours','DECON LLC Hours','DECON Col Hours','DECON LLC Cost','DECON Col Cost','ER Contract', 'ER Invoiced', 'DECON LLC ER Contracted']
+                   'Total Invoice', 'Total Cost', 'Total Hours','DECON LLC Hours','DECON Col Hours','DECON LLC Cost','DECON Col Cost','ER Contract', 'ER Invoiced']
     
     detail_cols = [c for c in detail_cols if c in df_detail.columns]
     df_detail_final = df_detail[detail_cols].copy()
@@ -1622,7 +1622,7 @@ def update_client_summary(selected_client, start_date, end_date):
     #dash table columns with numeric formatting on er columns 
     detail_columns = []
     for col in detail_cols:
-        if col in ['ER Contract', 'ER Invoiced', 'DECON LLC ER Contracted']:
+        if col in ['ER Contract', 'ER Invoiced']:
             detail_columns.append({'name': col, 'id': col, 'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)})
         else:
             detail_columns.append({'name': col, 'id': col})
@@ -2526,7 +2526,7 @@ def generate_monthly_report(selected_date):
         'Projected',  
         'Actual',
         'Invoiced %',
-        'ER DECON LLC Contracted',
+        # 'ER DECON LLC Contracted', # Hidden from report view, calculation remains.
         'DECON LLC Invoiced'
     ]
     
@@ -2545,8 +2545,6 @@ def generate_monthly_report(selected_date):
             col['name'] = 'MS'
         elif col['id'] == 'Clients':
             col['name'] = 'Client'
-        elif col['id'] == 'ER DECON LLC Contracted':
-            col['name'] = 'ER DECON LLC Contracted'
         elif col['id'] == 'DECON LLC Invoiced':
             col['name'] = 'ER DECON LLC Invoiced'
     
