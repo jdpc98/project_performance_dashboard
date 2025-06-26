@@ -340,11 +340,11 @@ def import_forecast_invoicing():
 # ==============================
 # DATA PROCESSING FUNCTIONS     
 # ==============================
-def calculate_new_er(df_project, project_no, df_merged_costs):
+def calculate_er_decon_llc_contracted(df_project, project_no, df_merged_costs):
     # First check if there are any staff_type=1 entries (US employees) for this project
     # If there are no US employees, return None (which will display as N/A)
-    project_costs = df_merged_costs[df_merged_costs['jobcode_2'].notna() & 
-                                  df_merged_costs['jobcode_2'].str.startswith(project_no)]
+    # Use the enhanced Project No column that considers both jobcode_2 and jobcode_3
+    project_costs = df_merged_costs[df_merged_costs['Project No'] == project_no]
     
     # Check if we have any US employees (staff_type=1) with hours
     type_1_entries = project_costs[project_costs['staff_type'] == 1]
@@ -422,8 +422,8 @@ def calculate_decon_llc_invoiced(df_project, project_no, df_merged_costs, df_raw
     
     # First check if there are any staff_type=1 entries (US employees) for this project
     # If there are no US employees, return None (which will display as N/A)
-    project_costs = df_merged_costs[df_merged_costs['jobcode_2'].notna() & 
-                                  df_merged_costs['jobcode_2'].str.startswith(project_no)]
+    # Use the enhanced Project No column that considers both jobcode_2 and jobcode_3
+    project_costs = df_merged_costs[df_merged_costs['Project No'] == project_no]
     
     # Check if we have any US employees (staff_type=1) with hours
     type_1_entries = project_costs[project_costs['staff_type'] == 1]
@@ -640,10 +640,8 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
             
             
             
-            # Get total cost from timesheet data
-            #project_costs = global_merged_df[global_merged_df['Project No'] == project_no]
-            project_costs = global_merged_df[
-            global_merged_df['jobcode_2'].apply(extract_project_number) == project_no]
+            # Get total cost from timesheet data using the enhanced Project No column
+            project_costs = global_merged_df[global_merged_df['Project No'] == project_no]
             total_cost = project_costs['day_cost'].sum() if not project_costs.empty else 0
 
             # Parse contracted amount
@@ -659,7 +657,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
             er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice else None
 
             # Calculate ER DECON LLC (excluding Colombian staff)
-            new_er = calculate_new_er(global_projects_df, project_no, global_merged_df)
+            new_er = calculate_er_decon_llc_contracted(global_projects_df, project_no, global_merged_df)
             
             # Calculate DECON LLC Invoiced (excluding Colombian staff for invoiced amount)
             decon_llc_invoiced = calculate_decon_llc_invoiced(global_projects_df, project_no, global_merged_df, global_raw_invoices)
@@ -769,7 +767,7 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
                 'Invoiced %_num': invoiced_percent_num,
                 'ER Contract': er_contract if er_contract is not None else None,
                 'ER Invoiced': er_invoiced if er_invoiced is not None else None,
-                'ER DECON LLC': new_er if new_er is not None else None,
+                'ER DECON LLC Contracted': new_er if new_er is not None else None,
                 'DECON LLC Invoiced': decon_llc_invoiced if decon_llc_invoiced is not None else None,
             }
 
@@ -781,18 +779,18 @@ def generate_monthly_report_data(selected_date, global_projects_df, global_merge
             # - Display actual value if calculated
             # - Only display "0.00" for projects with worked hours but zero calculated value
             if not has_worked_hours:
-                project_record['ER DECON LLC'] = "N/A"
+                project_record['ER DECON LLC Contracted'] = "N/A"
             else:
                 # If we have a valid value, use it
                 if new_er is not None:
-                    project_record['ER DECON LLC'] = f"{new_er:.2f}"
+                    project_record['ER DECON LLC Contracted'] = f"{new_er:.2f}"
                 # Special handling for 100% invoiced projects - should never show 0.00
                 elif invoiced_percent_num is not None and invoiced_percent_num >= 99.9:  # Use 99.9% to handle floating point issues
                     # For 100% invoiced projects, show N/A if we can't calculate a proper value
-                    project_record['ER DECON LLC'] = "N/A"
+                    project_record['ER DECON LLC Contracted'] = "N/A"
                 else:
                     # For all other cases with worked hours but no calculated value
-                    project_record['ER DECON LLC'] = "0.00"
+                    project_record['ER DECON LLC Contracted'] = "0.00"
 
             # For DECON LLC Invoiced - similar logic as above:
             # - Display "N/A" for projects with no worked hours
@@ -1398,19 +1396,54 @@ def main():
         ]].head(50)))
     # ==============================================================================
 
-    # If you need a final "Project No" column that merges 1928 logic:
-    # (You might have already done it above or in the dash code.)
-    # Example:
-    # def conditional_extract_project_no(row):
-    #     jc2 = str(row.get('jobcode_2','')).strip()
-    #     jc3 = str(row.get('jobcode_3','')).strip()
-    #     if jc2.startswith('1928'):
-    #         return jc3[:7].strip()
-    #     return jc2[:7].strip()
-    # merged_df['Project No'] = merged_df.apply(conditional_extract_project_no, axis=1)
+    # Apply the enhanced project number extraction logic that checks jobcode_3 first
+    def get_correct_project_no(row):
+        """
+        Extracts the project number by first checking jobcode_3, then falling back to jobcode_2.
+        This handles cases like '1928' where the specific project is in jobcode_3, 
+        and cases like '1787' where it's in jobcode_2.
+        """
+        jc3 = str(row.get('jobcode_3', ''))
+        jc2 = str(row.get('jobcode_2', ''))
+
+        # Try to extract from jobcode_3 first
+        proj_no_from_jc3 = extract_project_number(jc3)
+        if proj_no_from_jc3:
+            return proj_no_from_jc3
+
+        # If not found in jc3, extract from jobcode_2
+        proj_no_from_jc2 = extract_project_number(jc2)
+        return proj_no_from_jc2
+
+    merged_df['Project No'] = merged_df.apply(get_correct_project_no, axis=1)
+
+    # Calculate ER DECON LLC for all projects
+    print_green("Calculating ER DECON LLC for all projects...")
+    df_projects['ER DECON LLC Contracted'] = df_projects['Project No'].apply(
+        lambda proj_no: calculate_er_decon_llc_contracted(
+            df_projects[df_projects['Project No'] == proj_no], 
+            proj_no, 
+            merged_df
+        )
+    )
+    
+    # Calculate DECON LLC Invoiced for all projects  
+    print_green("Calculating DECON LLC Invoiced for all projects...")
+    df_projects['DECON LLC Invoiced'] = df_projects['Project No'].apply(
+        lambda proj_no: calculate_decon_llc_invoiced(
+            df_projects[df_projects['Project No'] == proj_no], 
+            proj_no, 
+            merged_df,
+            raw_invoices
+        )
+    )
+
+    print_green(f"ER DECON LLC calculated for {df_projects['ER DECON LLC Contracted'].notna().sum()} projects")
+    print_green(f"DECON LLC Invoiced calculated for {df_projects['DECON LLC Invoiced'].notna().sum()} projects")
 
     # Print final shape
     print_green("Final merged_df shape -> " + str(merged_df.shape))
+    print_green("Final df_projects shape -> " + str(df_projects.shape))
 
     # Return for pickling
     last_update = pd.to_datetime('today').strftime('%Y-%m-%d')

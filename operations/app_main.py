@@ -11,7 +11,7 @@ from dash import dcc
 # Import our separate modules
 import data_processing
 import config
-from data_processing import calculate_invoiced_percentage, calculate_new_er,extract_project_number, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
+from data_processing import calculate_invoiced_percentage, calculate_er_decon_llc_contracted, calculate_decon_llc_invoiced, extract_project_number, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
 import base64
 import plotly.io as pio
@@ -192,7 +192,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                         style_data_conditional=config.DATA_CONDITIONAL_ER + [
                             {
                                 'if': {
-                                    'filter_query': '{Value_num} < 1 && {Field} = "ER DECON LLC"',
+                                    'filter_query': '{Value_num} < 1 && ({Field} = "ER DECON LLC Contracted" || {Field} = "ER DECON LLC Invoiced")',
                                     'column_id': 'Value'
                                 },
                                 'color': 'red',
@@ -200,7 +200,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                             },
                             {
                                 'if': {
-                                    'filter_query': '{Value_num} >= 1 && {Value_num} <= 2.5 && {Field} = "ER DECON LLC"',
+                                    'filter_query': '{Value_num} >= 1 && {Value_num} <= 2.5 && ({Field} = "ER DECON LLC Contracted" || {Field} = "ER DECON LLC Invoiced")',
                                     'column_id': 'Value'
                                 },
                                 'color': 'orange',
@@ -208,7 +208,7 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                             },
                             {
                                 'if': {
-                                    'filter_query': '{Value_num} > 2.5 && {Field} = "ER DECON LLC"',
+                                    'filter_query': '{Value_num} > 2.5 && ({Field} = "ER DECON LLC Contracted" || {Field} = "ER DECON LLC Invoiced")',
                                     'column_id': 'Value'
                                 },
                                 'color': 'green',
@@ -439,15 +439,15 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                         
                         
                         {
-                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} < 1'},
+                            'if': {'column_id': 'ER DECON LLC Contracted', 'filter_query': '{ER DECON LLC Contracted} < 1'},
                             'color': 'red', 'fontWeight': 'bold'
                         },
                         {
-                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} >= 1 && {ER DECON LLC} <= 2.5'},
+                            'if': {'column_id': 'ER DECON LLC Contracted', 'filter_query': '{ER DECON LLC Contracted} >= 1 && {ER DECON LLC Contracted} <= 2.5'},
                             'color': 'orange', 'fontWeight': 'bold'
                         },
                         {
-                            'if': {'column_id': 'ER DECON LLC', 'filter_query': '{ER DECON LLC} > 2.5'},
+                            'if': {'column_id': 'ER DECON LLC Contracted', 'filter_query': '{ER DECON LLC Contracted} > 2.5'},
                             'color': 'green', 'fontWeight': 'bold'
                         },
                         {
@@ -1536,11 +1536,11 @@ def update_client_summary(selected_client, start_date, end_date):
     df_detail['New_ER'] = None
     for idx, row in df_detail.iterrows():
         project_no = row['Project No']
-        new_er = calculate_new_er(global_projects_df, project_no, global_merged_df)
+        new_er = calculate_er_decon_llc_contracted(global_projects_df, project_no, global_merged_df)
         df_detail.at[idx, 'New_ER'] = new_er
     
     # Format the new ER column like the other ER columns
-    df_detail['DECON LLC ER'] = df_detail['New_ER'].apply(
+    df_detail['DECON LLC ER Contracted'] = df_detail['New_ER'].apply(
         lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
     )
     """
@@ -1569,7 +1569,7 @@ def update_client_summary(selected_client, start_date, end_date):
     #prepare final cols for project summary table 
     
     detail_cols = ['Project No', 'Status', 'Type', 'Market Segment', 'Contracted Amount',
-                   'Total Invoice', 'Total Cost', 'Total Hours','DECON LLC Hours','DECON Col Hours','DECON LLC Cost','DECON Col Cost','ER Contract', 'ER Invoiced', 'DECON LLC ER']
+                   'Total Invoice', 'Total Cost', 'Total Hours','DECON LLC Hours','DECON Col Hours','DECON LLC Cost','DECON Col Cost','ER Contract', 'ER Invoiced', 'DECON LLC ER Contracted']
     
     detail_cols = [c for c in detail_cols if c in df_detail.columns]
     df_detail_final = df_detail[detail_cols].copy()
@@ -1622,7 +1622,7 @@ def update_client_summary(selected_client, start_date, end_date):
     #dash table columns with numeric formatting on er columns 
     detail_columns = []
     for col in detail_cols:
-        if col in ['ER Contract', 'ER Invoiced', 'DECON LLC ER']:
+        if col in ['ER Contract', 'ER Invoiced', 'DECON LLC ER Contracted']:
             detail_columns.append({'name': col, 'id': col, 'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)})
         else:
             detail_columns.append({'name': col, 'id': col})
@@ -1911,7 +1911,8 @@ def update_project_tables(selected_jobcode):
             {"Field": "Total Invoice", "Value": "Data not found", "Value_num": 0}, 
             {"Field": "Total Cost", "Value": "Data not found", "Value_num": 0},
             {"Field": "ER Contract", "Value": "Data not found", "Value_num": 0},
-            {"Field": "ER DECON LLC", "Value": "Data not found", "Value_num": 0}
+            {"Field": "ER DECON LLC Contracted", "Value": "Data not found", "Value_num": 0},
+            {"Field": "ER DECON LLC Invoiced", "Value": "Data not found", "Value_num": 0}
         ]
         
         left_columns = [{"name": "Field", "id": "Field"}, {"name": "Value", "id": "Value"}]
@@ -1977,10 +1978,11 @@ def update_project_tables(selected_jobcode):
     er_contract = contracted_amount / total_cost if total_cost > 0 and contracted_amount is not None else None
     er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice is not None and total_invoice > 0 else None
     
-    # Calculate ER DECON LLC
-    # Standardize selected_jobcode before passing to calculate_new_er
+    # Calculate ER DECON LLC Contracted and Invoiced
+    # Standardize selected_jobcode before passing to functions
     standardized_selected_jobcode = standardize_project_no(str(selected_jobcode))
-    er_decon_llc = calculate_new_er(global_projects_df, standardized_selected_jobcode, global_merged_df)
+    er_decon_llc_contracted = calculate_er_decon_llc_contracted(global_projects_df, standardized_selected_jobcode, global_merged_df)
+    er_decon_llc_invoiced = calculate_decon_llc_invoiced(global_projects_df, standardized_selected_jobcode, global_merged_df, global_raw_invoices)
 
     # Format values
     format_money = lambda x: f"${x:,.2f}" if x is not None else "N/A"
@@ -1994,7 +1996,8 @@ def update_project_tables(selected_jobcode):
         {"Field": "Remaining to Invoice", "Value": format_money(remaining_to_invoice), "Value_num": remaining_to_invoice or 0},
         {"Field": "ER Contract", "Value": format_er(er_contract), "Value_num": er_contract or 0},
         {"Field": "ER Invoiced", "Value": format_er(er_invoiced), "Value_num": er_invoiced or 0},
-        {"Field": "ER DECON LLC", "Value": format_er(er_decon_llc), "Value_num": er_decon_llc or 0}
+        {"Field": "ER DECON LLC Contracted", "Value": format_er(er_decon_llc_contracted), "Value_num": er_decon_llc_contracted or 0},
+        {"Field": "ER DECON LLC Invoiced", "Value": format_er(er_decon_llc_invoiced), "Value_num": er_decon_llc_invoiced or 0}
     ]
     
     # Define columns
@@ -2523,6 +2526,7 @@ def generate_monthly_report(selected_date):
         'Projected',  
         'Actual',
         'Invoiced %',
+        'ER DECON LLC Contracted',
         'DECON LLC Invoiced'
     ]
     
@@ -2539,12 +2543,12 @@ def generate_monthly_report(selected_date):
             col['name'] = 'SL'
         elif col['id'] == 'Market Segment':
             col['name'] = 'MS'
-        elif col['id'] == 'ER DECON LLC':
-            col['name'] = 'ER Decon LLC'
         elif col['id'] == 'Clients':
             col['name'] = 'Client'
+        elif col['id'] == 'ER DECON LLC Contracted':
+            col['name'] = 'ER DECON LLC Contracted'
         elif col['id'] == 'DECON LLC Invoiced':
-            col['name'] = 'ER DECON LLC'
+            col['name'] = 'ER DECON LLC Invoiced'
     
     # Create a totals row
     totals_row = {col: '' for col in visible_columns}  # Initialize with empty strings for all columns
