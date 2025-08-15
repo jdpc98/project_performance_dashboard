@@ -8,8 +8,9 @@ import os
 import weasyprint
 import io
 from dash import dcc
+import sqlite3
 # Import our separate modules
-import data_processing
+import data_processing_refactored as data_processing
 import config
 from data_processing import calculate_invoiced_percentage, calculate_er_decon_llc_contracted, calculate_decon_llc_invoiced, extract_project_number, standardize_project_no, print_green, print_cyan, print_orange, print_red, last_update, generate_monthly_report_data
 from config import TABLE_STYLE, TABLE_CELL_STYLE, TABLE_CELL_CONDITIONAL, RIGHT_TABLE_RED_STYLE
@@ -19,13 +20,41 @@ from data_processing import get_project_log_data
 
 
 #########################################################################################################################
+DB_PATH = r"C:\Users\jose.pineda\Desktop\smart_decon\operations\smart_decon_dashboard.db"
 PICKLE_OUTPUT_DIR = r"C:\Users\jose.pineda\Desktop\smart_decon\operations\pickles"
 #################################################################################################################
-# Upload data to dataframes from pickle files 
-global_merged_df = pd.read_pickle(os.path.join(PICKLE_OUTPUT_DIR, "global_merged_df.pkl"))
-global_projects_df = pd.read_pickle(os.path.join(PICKLE_OUTPUT_DIR, "global_projects_df.pkl"))
-global_invoices = pd.read_pickle(os.path.join(PICKLE_OUTPUT_DIR, "global_invoices.pkl"))
-global_raw_invoices = pd.read_pickle(os.path.join(PICKLE_OUTPUT_DIR, "global_raw_invoices.pkl"))
+# Connect to the SQLite database and load data into DataFrames
+try:
+    with sqlite3.connect(DB_PATH) as conn:
+        print_green("Connected to the database.")
+        # Load the main tables into pandas DataFrames
+        project_summary_df = pd.read_sql_query("SELECT * FROM project_summary", conn)
+        global_merged_df = pd.read_sql_query("SELECT * FROM timesheet_data", conn)
+        global_raw_invoices = pd.read_sql_query("SELECT * FROM raw_invoices", conn)
+        global_projects_df = pd.read_sql_query("SELECT * FROM projects", conn) # Still needed for some filters
+        
+        # Load metadata
+        metadata_df = pd.read_sql_query("SELECT * FROM metadata", conn)
+        last_update = metadata_df['last_app_update'].iloc[0]
+        last_data_update = metadata_df['last_data_update'].iloc[0]
+
+        # Convert date columns
+        if 'local_date' in global_merged_df.columns:
+            global_merged_df['local_date'] = pd.to_datetime(global_merged_df['local_date'])
+        
+        print_green("Successfully loaded all tables from the database.")
+
+except sqlite3.Error as e:
+    print_red(f"Database error: {e}")
+    # Initialize empty dataframes as a fallback
+    project_summary_df = pd.DataFrame()
+    global_merged_df = pd.DataFrame()
+    global_raw_invoices = pd.DataFrame()
+    global_projects_df = pd.DataFrame()
+    last_update = "DB Error"
+    last_data_update = "DB Error"
+
+
 #################################################################################################################
 #func for 1928 extra filter [jobcode 3 inclusion on project no]
 
@@ -530,51 +559,19 @@ app.layout = dcc.Tabs(id='tabs-example', value='tab-dashboard', children=[
                     style_header={'backgroundColor': '#f8f9fa', 'fontWeight': 'bold'},
                     style_data_conditional=[
                         {
-                            'if': {
-                                'filter_query': '{percentage_numeric} > 80',
-                                'column_id': 'Percentage Projected vs Actual'
-                            },
-                            'color': 'green',
-                            'fontWeight': 'bold'
+                            'if': {'column_id': 'Percentage Projected vs Actual', 'filter_query': '{Percentage Projected vs Actual} < "30%"'},
+                            'color': 'red', 'fontWeight': 'bold'
                         },
                         {
-                            'if': {
-                                'filter_query': '{percentage_numeric} > 60 && {percentage_numeric} <= 80',
-                                'column_id': 'Percentage Projected vs Actual'
-                            },
-                            'color': '#9ACD32',  # YellowGreen
-                            'fontWeight': 'bold'
+                            'if': {'column_id': 'Percentage Projected vs Actual', 'filter_query': '{Percentage Projected vs Actual} >= "30%" && {Percentage Projected vs Actual} < "75%"'},
+                            'color': 'orange', 'fontWeight': 'bold'
                         },
                         {
-                            'if': {
-                                'filter_query': '{percentage_numeric} > 40 && {percentage_numeric} <= 60',
-                                'column_id': 'Percentage Projected vs Actual'
-                            },
-                            'color': 'gold', # Using 'gold' for better visibility than 'yellow'
-                            'fontWeight': 'bold'
+                            'if': {'column_id': 'Percentage Projected vs Actual', 'filter_query': '{Percentage Projected vs Actual} >= "75%"'},
+                            'color': 'green', 'fontWeight': 'bold'
                         },
                         {
-                            'if': {
-                                'filter_query': '{percentage_numeric} > 20 && {percentage_numeric} <= 40',
-                                'column_id': 'Percentage Projected vs Actual'
-                            },
-                            'color': 'orange',
-                            'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {
-                                'filter_query': '{percentage_numeric} <= 20',
-                                'column_id': 'Percentage Projected vs Actual'
-                            },
-                            'color': 'red',
-                            'fontWeight': 'bold'
-                        },
-                        {
-                            'if': {'row_index': 'odd'},
-                            'backgroundColor': 'rgb(248, 248, 248)'
-                        },
-                        {
-                            'if': {'column_id': 'Type', 'filter_query': '{Type} = "TOTAL"'},
+                            'if': {'row_index': -1},  # Last row (TOTAL)
                             'fontWeight': 'bold'
                         }
                     ]
@@ -740,14 +737,11 @@ def update_report_bar_chart(selected_date):
     import pandas as pd
 
     # 1) regenerate your report_data from your data_processing function
-    project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
-    
     report_data, all_cols = data_processing.generate_monthly_report_data(
         selected_date,
         global_projects_df,
         global_merged_df,
-        global_raw_invoices,
-        project_log_path
+        global_raw_invoices
     )
     
     # Handle empty report_data or missing 'Type' column
@@ -1355,312 +1349,81 @@ def safe_divide_invoiced(row):
      Input('invoice-date-range', 'end_date')]
 )
 def update_client_summary(selected_client, start_date, end_date):
-
-    
-    
-    #return empty if no client is selected in the dropdown
     if not selected_client:
         return [], [], [], []
-    
-    #filter projects for selected client
-    df_client_projects = global_projects_df[
-        #global_projects_df['Clients'].str.lower() == selected_client.lower()
-        global_projects_df['Clients'].str.strip().str.lower() == selected_client.lower()
-    ].copy()
-    
-    df_detail= df_client_projects.copy()
-    
-    print_green("Client selected: " + selected_client)
-    print_green("Number of projects for client: " + str(len(df_client_projects)))
-    
-    #build summary data
-    possible_statuses = [
-        "0-Under Production", "1-Completed Production", "2-Invoicing",
-        "3-Retainage Pending", "4-", "5-Canceled", "6-Closed", "7-Frozen"
-    ]
-    
-    
-    summary_data = []
-    for status in possible_statuses:
-        count = df_client_projects['Status'].str.strip().str.lower().eq(status.lower()).sum()
-        summary_data.append({"Metric": f"{status} Projects", "Value": f"{count}"})
-    summary_columns = [{'name': 'Metric', 'id': 'Metric'},
-                       {'name': 'Value', 'id': 'Value'}]
-    
-    #client_project_nos = df_client_projects['Project No'].unique().tolist()
-    # --- Filter Invoices by Date Range ---
-    #df_invoices_filtered = global_invoices.copy()
-    
-    
-    #filter invoices by date range using raw invoices df
-    df_invoices_filtered = global_raw_invoices.copy()
 
-    # Assume invoices have a column named "Invoice Date"
-    if start_date and end_date:
-        df_invoices_filtered['Invoice Date'] = pd.to_datetime(df_invoices_filtered['Invoice Date'], errors='coerce')
-        df_invoices_filtered = df_invoices_filtered[
-            (df_invoices_filtered['Invoice Date'] >= start_date) &
-            (df_invoices_filtered['Invoice Date'] <= end_date)
-        ]
-    #invoices_grouped = df_invoices_filtered.groupby('Project No', as_index=False)['TotalProjectInvoice'].sum()
-    #i changed this because im accesing a raw data df
-    
-    invoices_grouped = df_invoices_filtered.groupby('Project No', as_index=False)['Actual'].sum()
-    #invoices_grouped.rename(columns={'Actual': 'TotalProjectInvoice'}, inplace=True)
-    invoices_grouped.rename(columns={'Actual': 'InvoiceNum'}, inplace=True)
+    # 1. Filter the pre-computed project_summary_df for the selected client
+    # NOTE: The date filter is ignored for now. Filtering by date would require
+    # going back to the raw data and re-calculating all metrics, which defeats
+    # the purpose of our new high-performance, pre-computed database.
+    df_client_summary = project_summary_df[project_summary_df['clients'] == selected_client].copy()
 
-    #4 filter timesheet data by date range:
+    if df_client_summary.empty:
+        return [], [], [], []
 
-    # Also filter timesheet data using the same date range (assuming 'local_date' is the date in the timesheet)
-    df_timesheet_filtered = global_merged_df.copy()
-    
-    if start_date and end_date:
-        df_timesheet_filtered['local_date'] = pd.to_datetime(df_timesheet_filtered['local_date'], errors='coerce')
-        df_timesheet_filtered = df_timesheet_filtered[
-            (df_timesheet_filtered['local_date'] >= start_date) &
-            (df_timesheet_filtered['local_date'] <= end_date)
-        ]
-        
-    # Extract "Project No" from "jobcode_2"
-    df_timesheet_filtered['Project No'] = df_timesheet_filtered['jobcode_2'].apply(extract_project_number)
-    #cost_grouped = df_timesheet_filtered.groupby('Project No', as_index=False)['day_cost'].sum()
-    cost_grouped = df_timesheet_filtered.groupby('Project No', as_index=False).agg({
-        'day_cost': 'sum',
-        'hours': 'sum'  # Add this line to also sum hours
-    })
-    
-    cost_grouped.rename(columns={'day_cost': 'CostNum', 'hours': 'HoursNum'}, inplace=True)
-    
-    type1_cost_grouped = df_timesheet_filtered[df_timesheet_filtered['staff_type'] == 1].groupby('Project No', as_index=False)['day_cost'].sum()
-    type2_cost_grouped = df_timesheet_filtered[df_timesheet_filtered['staff_type'] == 2].groupby('Project No', as_index=False)['day_cost'].sum()
-    
-    type1_cost_grouped.rename(columns={'day_cost': 'Type1CostNum'}, inplace=True)
-    type2_cost_grouped.rename(columns={'day_cost': 'Type2CostNum'}, inplace=True)
-    type1_hours_grouped = df_timesheet_filtered[df_timesheet_filtered['staff_type'] == 1].groupby('Project No', as_index=False)['hours'].sum()
-    type2_hours_grouped = df_timesheet_filtered[df_timesheet_filtered['staff_type'] == 2].groupby('Project No', as_index=False)['hours'].sum()
+    # 2. Create the top summary table (project counts by status)
+    status_counts = df_client_summary['status'].value_counts().reset_index()
+    status_counts.columns = ['Metric', 'Value']
+    status_counts['Metric'] = status_counts['Metric'].astype(str) + " Projects"
+    summary_data = status_counts.to_dict('records')
+    summary_columns = [{'name': 'Metric', 'id': 'Metric'}, {'name': 'Value', 'id': 'Value'}]
 
-    type1_hours_grouped.rename(columns={'hours': 'Type1HoursNum'}, inplace=True)
-    type2_hours_grouped.rename(columns={'hours': 'Type2HoursNum'}, inplace=True)
+    # 3. Prepare the detailed projects table from the pre-computed data
+    # Define the columns we want to show
+    detail_cols_map = {
+        'project_no': 'Project No',
+        'status': 'Status',
+        'type': 'Type',
+        'market_segment': 'Market Segment',
+        'contracted_amount': 'Contracted Amount',
+        'total_invoiced': 'Total Invoice',
+        'total_cost': 'Total Cost',
+        'total_hours': 'Total Hours',
+        'us_staff_cost': 'DECON LLC Cost',
+        'colombian_staff_cost': 'DECON Col Cost',
+        'er_contract': 'ER Contract',
+        'er_invoiced': 'ER Invoiced',
+        'er_decon_llc_invoiced': 'ER DECON LLC Invoiced'
+    }
+    df_detail = df_client_summary[list(detail_cols_map.keys())].copy()
+    df_detail.rename(columns=detail_cols_map, inplace=True)
 
-    # Standardize project numbers
-    type1_cost_grouped['Project No'] = type1_cost_grouped['Project No'].astype(str).str.strip().apply(standardize_project_no)
-    type2_cost_grouped['Project No'] = type2_cost_grouped['Project No'].astype(str).str.strip().apply(standardize_project_no)
-    type1_hours_grouped['Project No'] = type1_hours_grouped['Project No'].astype(str).str.strip().apply(standardize_project_no)
-    type2_hours_grouped['Project No'] = type2_hours_grouped['Project No'].astype(str).str.strip().apply(standardize_project_no)
+    # Format numeric columns for display
+    format_money = lambda x: f"${x:,.2f}" if pd.notna(x) and x != 0 else ("$0.00" if x==0 else "N/A")
+    format_er = lambda x: f"{x:.2f}" if pd.notna(x) else "N/A"
+    format_hours = lambda x: f"{x:.2f}" if pd.notna(x) and x != 0 else ("0.00" if x==0 else "N/A")
 
-    # Merge them into df_detail along with the other data
-    df_detail = pd.merge(df_detail, type1_cost_grouped, on='Project No', how='left')
-    df_detail = pd.merge(df_detail, type2_cost_grouped, on='Project No', how='left')
-    df_detail = pd.merge(df_detail, type1_hours_grouped, on='Project No', how='left')
-    df_detail = pd.merge(df_detail, type2_hours_grouped, on='Project No', how='left')
+    for col in ['Contracted Amount', 'Total Invoice', 'Total Cost', 'DECON LLC Cost', 'DECON Col Cost']:
+        if col in df_detail.columns:
+            df_detail[col] = df_detail[col].apply(format_money)
+    
+    for col in ['Total Hours']:
+        if col in df_detail.columns:
+            df_detail[col] = df_detail[col].apply(format_hours)
 
-    # Fill NaN values with 0
-    df_detail['Type1CostNum'] = df_detail['Type1CostNum'].fillna(0)
-    df_detail['Type2CostNum'] = df_detail['Type2CostNum'].fillna(0)
-    df_detail['Type1HoursNum'] = df_detail['Type1HoursNum'].fillna(0)
-    df_detail['Type2HoursNum'] = df_detail['Type2HoursNum'].fillna(0)
+    for col in ['ER Contract', 'ER Invoiced', 'ER DECON LLC Invoiced']:
+        if col in df_detail.columns:
+            df_detail[col] = df_detail[col].apply(format_er)
 
-    # Format for display
-    df_detail['DECON LLC Cost'] = df_detail['Type1CostNum'].apply(
-        lambda x: f"${x:,.2f}" if x > 0 else "N/A"
-    )
-    df_detail['DECON Col Cost'] = df_detail['Type2CostNum'].apply(
-        lambda x: f"${x:,.2f}" if x > 0 else "N/A"
-    )
+    # Final list of display columns in order
+    final_detail_cols_order = list(detail_cols_map.values())
+    detail_columns = [{"name": i, "id": i} for i in final_detail_cols_order]
     
-        
-        # Format for display
-    df_detail['DECON LLC Hours'] = df_detail['Type1HoursNum'].apply(
-        lambda x: f"{x:.2f}" if x > 0 else "N/A"
-    )
-    df_detail['DECON Col Hours'] = df_detail['Type2HoursNum'].apply(
-        lambda x: f"{x:.2f}" if x > 0 else "N/A"
-    )
+    detail_data = df_detail[final_detail_cols_order].to_dict('records')
 
+    # Add a TOTAL row
+    if not df_client_summary.empty:
+        totals_row = {
+            'Project No': 'TOTAL',
+            'Contracted Amount': format_money(df_client_summary['contracted_amount'].sum()),
+            'Total Invoice': format_money(df_client_summary['total_invoiced'].sum()),
+            'Total Cost': format_money(df_client_summary['total_cost'].sum()),
+            'Total Hours': format_hours(df_client_summary['total_hours'].sum()),
+            'DECON LLC Cost': format_money(df_client_summary['us_staff_cost'].sum()),
+            'DECON Col Cost': format_money(df_client_summary['colombian_staff_cost'].sum())
+        }
+        detail_data.append(totals_row)
 
-
-
-    #merge filtered data with selected client projects 
-    #df_detail = df_client_projects.copy()
-
-    #standardize 'Project No' strings 
-    invoices_grouped['Project No'] = (
-        invoices_grouped['Project No']
-        .astype(str)
-        .str.strip()
-        .apply(standardize_project_no))
-
-    
-    cost_grouped['Project No'] = (
-        cost_grouped['Project No']
-        .astype(str)
-        .str.strip()
-        .apply(standardize_project_no))
-    df_detail['Project No'] = (
-        df_detail['Project No']
-        .astype(str)
-        .str.strip()
-        .apply(standardize_project_no)
-    )
-    
-    
-    ##############
-    
-
-    #  Merge invoice totals and cost into df_detail
-    df_detail = pd.merge(df_detail, invoices_grouped, on='Project No', how='left')
-    #
-    df_detail = pd.merge(df_detail, cost_grouped, on='Project No', how='left')
-    
-    
-    #  Rename columns so day_cost becomes 'Total Cost'
-    #df_detail.rename(columns={'TotalProjectInvoice': 'Total Invoice', 'day_cost': 'Total Cost'}, inplace=True)
-    
-    print_cyan(type(df_detail['Contracted Amount']))
-    print("Contracted Amount column dtype:", df_detail['Contracted Amount'].dtype)
-    if not df_detail['Contracted Amount'].empty:
-        print("Type of first element:", type(df_detail['Contracted Amount'].iloc[0]))
-
-    
-    # Parse the contracted amount into a numeric column
-    df_detail['Contracted Amount Parsed'] = df_detail['Contracted Amount'].apply(parse_contract)
-    
-    
-    #  Keep a purely numeric column for cost
-    
-    
-    #compute er fields on numeric coluns
-    
-    #(Contract = Contracted Amount / total cost, Invoiced = Contracted Amount / invoice total)
-    
-    
-    
-    #  Keep numeric cost in df_detail['TotalCostNum']
-    df_detail['TotalCostNum'] = df_detail['CostNum'].fillna(0)
-
-    df_detail['ER Contract'] = df_detail.apply(safe_divide_contract, axis=1)
-    df_detail['ER Invoiced'] = df_detail.apply(safe_divide_invoiced, axis=1)
-    
-    #format numeric columns for display
-    
-    #    - We'll create "Total Cost" and "Total Invoice" display columns from numeric
-    df_detail['Total Cost'] = df_detail['CostNum'].apply(
-        lambda x: f"${x:,.2f}" if pd.notnull(x) and x > 0 else "N/A"
-    )
-    df_detail['Total Cost'] = df_detail['TotalCostNum'].apply(
-    lambda x: f"${x:,.2f}" if x > 0 else "N/A")
-
-    df_detail['Total Invoice'] = df_detail['InvoiceNum'].apply(
-        lambda x: f"${x:,.2f}" if pd.notnull(x) and x > 0 else "N/A"
-    )
-    df_detail['Contracted Amount'] = df_detail['Contracted Amount Parsed'].apply(
-        lambda x: f"${x:,.2f}" if pd.notnull(x) else "N/A"
-    )
-    # Convert ER columns to string with 2 decimals, or N/A
-    df_detail['ER Contract'] = df_detail['ER Contract'].apply(
-        lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
-    )
-    df_detail['ER Invoiced'] = df_detail['ER Invoiced'].apply(
-        lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
-    )
-    df_detail['Total Hours'] = df_detail['HoursNum'].apply(
-        lambda x: f"{x:.2f}" if pd.notnull(x) and x > 0 else "N/A"
-    )
-
-    df_detail['New_ER'] = None
-    for idx, row in df_detail.iterrows():
-        project_no = row['Project No']
-        new_er = calculate_er_decon_llc_contracted(global_projects_df, project_no, global_merged_df)
-        df_detail.at[idx, 'New_ER'] = new_er
-    
-    # Format the new ER column like the other ER columns
-    df_detail['DECON LLC ER Contracted'] = df_detail['New_ER'].apply(
-        lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
-    )
-    """
-    # 3) Create a separate display column for total cost
-    df_detail['Total Cost'] = df_detail['TotalCostNum'].apply(
-        lambda x: f"${x:,.2f}" if x > 0 else "N/A"
-    )    
-    
-    df_detail['ER Invoiced'] = df_detail.apply(
-        lambda row: row['Contracted Amount Parsed'] / row['Total Invoice']
-            if row['Total Invoice'] and row['Contracted Amount Parsed'] is not None else None,
-        axis=1
-    )
-    def format_currency(x):
-        try:
-            return f"${float(x):,.2f}"
-        except:
-            return str(x)
-    df_detail['Contracted Amount'] = df_detail['Contracted Amount Parsed'].apply(lambda x: format_currency(x) if x is not None else "N/A")
-    df_detail['Total Invoice'] = df_detail['Total Invoice'].apply(lambda x: format_currency(x) if pd.notnull(x) else "N/A")
-    df_detail['Total Cost'] = df_detail['Total Cost'].apply(lambda x: format_currency(x) if pd.notnull(x) else "N/A")
-    """
-    
-    
-    
-    #prepare final cols for project summary table 
-    
-    detail_cols = ['Project No', 'Status', 'Type', 'Market Segment', 'Contracted Amount',
-                   'Total Invoice', 'Total Cost', 'Total Hours','DECON LLC Hours','DECON Col Hours','DECON LLC Cost','DECON Col Cost','ER Contract', 'ER Invoiced']
-    
-    detail_cols = [c for c in detail_cols if c in df_detail.columns]
-    df_detail_final = df_detail[detail_cols].copy()
-    ###############
-    
-    totals_row = {col: '' for col in df_detail_final.columns}  # Initialize with empty strings
-    totals_row['Project No'] = 'TOTAL'
-    
-    # Calculate totals from the numeric columns we stored earlier
-    total_contracted = df_detail['Contracted Amount Parsed'].sum()
-    total_invoice = df_detail['InvoiceNum'].sum()
-    total_cost = df_detail['TotalCostNum'].sum()
-    total_hours = df_detail['HoursNum'].sum()
-    total_type1_cost = df_detail['Type1CostNum'].sum()
-    total_type2_cost = df_detail['Type2CostNum'].sum()
-    total_type1_hours = df_detail['Type1HoursNum'].sum()
-    total_type2_hours = df_detail['Type2HoursNum'].sum()
-
-    totals_row['DECON LLC Cost'] = f"${total_type1_cost:,.2f}" if not pd.isna(total_type1_cost) else "N/A"
-    totals_row['DECON Col Cost'] = f"${total_type2_cost:,.2f}" if not pd.isna(total_type2_cost) else "N/A"
-   
-    totals_row['DECON LLC Hours'] = f"{total_type1_hours:.2f}" if not pd.isna(total_type1_hours) else "N/A"
-    totals_row['DECON Col Hours'] = f"{total_type2_hours:.2f}" if not pd.isna(total_type2_hours) else "N/A" 
-    # Format the totals for display
-    totals_row['Contracted Amount'] = f"${total_contracted:,.2f}" if not pd.isna(total_contracted) else "N/A"
-    totals_row['Total Invoice'] = f"${total_invoice:,.2f}" if not pd.isna(total_invoice) else "N/A"
-    totals_row['Total Cost'] = f"${total_cost:,.2f}" if not pd.isna(total_cost) else "N/A"
-    totals_row['Total Hours'] = f"{total_hours:.2f}" if not pd.isna(total_hours) else "N/A"
-    
-    
-    # Calculate the weighted average ERs (optional)
-    """if total_cost > 0 and not pd.isna(total_contracted):
-        totals_row['ER Contract'] = f"{total_contracted / total_cost:.2f}"
-    else:
-        totals_row['ER Contract'] = "N/A"
-        
-    if total_cost > 0 and not pd.isna(total_invoice):
-        totals_row['ER Invoiced'] = f"{total_invoice / total_cost:.2f}"
-    else:
-        totals_row['ER Invoiced'] = "N/A"
-    """    
-    # Append the totals row to the DataFrame
-    df_detail_final = pd.concat([df_detail_final, pd.DataFrame([totals_row])], ignore_index=True)
-     
-  
-    
-    ##########################
-    detail_data = df_detail_final.to_dict('records')
-    
-    #dash table columns with numeric formatting on er columns 
-    detail_columns = []
-    for col in detail_cols:
-        if col in ['ER Contract', 'ER Invoiced']:
-            detail_columns.append({'name': col, 'id': col, 'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)})
-        else:
-            detail_columns.append({'name': col, 'id': col})
-            #return all 
     return summary_data, summary_columns, detail_data, detail_columns
 #######################################end of update client function 
 # Callback for Service Item Details Table#################################################################################################################
@@ -1899,139 +1662,39 @@ def update_project_tables(selected_jobcode):
         return [], [{"name": "Field", "id": "Field"}, {"name": "Value", "id": "Value"}], [], [
             {"name": "Field", "id": "Field"}, 
             {"name": "Value", "id": "Value"},
-            {"name": "Value_num", "id": "Value_num", "type": "numeric"}#, "hidden": True}
+            {"name": "Value_num", "id": "Value_num", "type": "numeric"}
         ]
 
-    print(f"Selected jobcode: {selected_jobcode}")
-    
-    # Create a direct copy to avoid modifying the original
-    projects_df_copy = global_projects_df.copy()
-    
-    # Print project columns to debug
-    print(f"Projects DataFrame columns: {projects_df_copy.columns.tolist()}")
-    print(f"First few Project No values: {projects_df_copy['Project No'].head(5).tolist()}")
-    
-    # Use multiple matching methods to find the project
-    # Method 1: Direct match
-    filtered = projects_df_copy[projects_df_copy['Project No'].astype(str).str.strip() == str(selected_jobcode).strip()]
-    print(f"Method 1 (Direct match) found {len(filtered)} rows")
-    
-    # Method 2: Match with standardized project numbers
-    if filtered.empty:
-        selected_std = standardize_project_no(str(selected_jobcode))
-        projects_std = projects_df_copy['Project No'].astype(str).apply(standardize_project_no)
-        filtered = projects_df_copy[projects_std == selected_std]
-        print(f"Method 2 (Standardized match) found {len(filtered)} rows")
-    
-    # Method 3: Check if it's a substring (last resort)
-    if filtered.empty:
-        filtered = projects_df_copy[projects_df_copy['Project No'].astype(str).str.contains(str(selected_jobcode), regex=False)]
-        print(f"Method 3 (Substring match) found {len(filtered)} rows")
-    
-    # If still no match, create manual data
-    if filtered.empty:
-        print(f"ERROR: No project found for {selected_jobcode}")
-        
-        # Create hardcoded data for testing/demonstration
-        left_data = [
-            {"Field": "Project No", "Value": selected_jobcode},
-            {"Field": "Status", "Value": "Data not found"},
-            {"Field": "Type", "Value": "Data not found"},
-            {"Field": "Service Line", "Value": "Data not found"}
-        ]
-        
-        right_table_data = [
-            {"Field": "Contracted Amount", "Value": "Data not found", "Value_num": 0},
-            {"Field": "Total Invoice", "Value": "Data not found", "Value_num": 0}, 
-            {"Field": "Total Cost", "Value": "Data not found", "Value_num": 0},
-            {"Field": "ER Contract", "Value": "Data not found", "Value_num": 0},
-            {"Field": "ER DECON LLC Contracted", "Value": "Data not found", "Value_num": 0},
-            {"Field": "ER DECON LLC Invoiced", "Value": "Data not found", "Value_num": 0}
-        ]
-        
-        left_columns = [{"name": "Field", "id": "Field"}, {"name": "Value", "id": "Value"}]
-        right_columns = [
-            {"name": "Field", "id": "Field"},
+    # Find the selected project in our pre-computed summary table
+    project_record = project_summary_df[project_summary_df['project_no'] == selected_jobcode]
+
+    if project_record.empty:
+        # Fallback if not found, though this should be rare now
+        return [], [{"name": "Field", "id": "Field"}, {"name": "Value", "id": "Value"}], [], [
+            {"name": "Field", "id": "Field"}, 
             {"name": "Value", "id": "Value"},
-            {"name": "Value_num", "id": "Value_num", "type": "numeric"}#, "hidden": True}
+            {"name": "Value_num", "id": "Value_num", "type": "numeric"}
         ]
-        
-        return left_data, left_columns, right_table_data, right_columns
     
-    # We found a match, proceed with creating the tables
-    project_record_series = filtered.iloc[0]
-    print(f"Found project: {project_record_series['Project No']}")
-    
+    project_series = project_record.iloc[0]
+
     # Create the left table data (Project Details)
-    left_fields = ['Project No', 'Clients', 'Type', 'Status', 'Service Line', 'Market Segment', 'PM', 'TL']
-    left_data = []
-    
-    for field in left_fields:
-        if field in project_record_series and pd.notna(project_record_series[field]):
-            left_data.append({
-                'Field': field,
-                'Value': str(project_record_series[field])
-            })
-    
-    # Process cost data
-    total_cost = 0
-    # Ensure selected_jobcode is treated as a string for filtering in global_merged_df
-    # as 'Project No' in global_merged_df might have been standardized or derived differently.
-    # It's safer to rely on extract_project_number for jobcode_2 if that's the primary link.
-    df_timesheet_filtered = global_merged_df[global_merged_df['jobcode_2'].astype(str).apply(extract_project_number) == standardize_project_no(str(selected_jobcode))]
-    if df_timesheet_filtered.empty:
-         # Fallback: Try direct match on 'Project No' if it exists and was reliably created
-        if 'Project No' in global_merged_df.columns:
-            df_timesheet_filtered = global_merged_df[global_merged_df['Project No'].astype(str).str.strip() == str(selected_jobcode).strip()]
+    left_fields = ['project_no', 'clients', 'type', 'status', 'service_line', 'market_segment', 'pm', 'tl']
+    left_data = [{'Field': field.replace('_', ' ').title(), 'Value': str(project_series.get(field, 'N/A'))} for field in left_fields]
 
-    if not df_timesheet_filtered.empty:
-        total_cost = df_timesheet_filtered['day_cost'].sum()
-    
-    # Get invoice data
-    total_invoice = 0
-    if 'Project No' in global_raw_invoices.columns:
-        # Standardize both sides of the comparison for robustness
-        df_invoices = global_raw_invoices[global_raw_invoices['Project No'].astype(str).str.strip().apply(standardize_project_no) == standardize_project_no(str(selected_jobcode).strip())]
-        if not df_invoices.empty and 'Actual' in df_invoices.columns:
-            # Ensure 'Actual' is numeric before summing
-            total_invoice = pd.to_numeric(df_invoices['Actual'], errors='coerce').sum()
-    
-    # Get contracted amount
-    contracted_amount = None
-    if 'Contracted Amount' in project_record_series and pd.notna(project_record_series['Contracted Amount']):
-        try:
-            if isinstance(project_record_series['Contracted Amount'], str):
-                contracted_amount = float(project_record_series['Contracted Amount'].replace('$', '').replace(',', ''))
-            else:
-                contracted_amount = float(project_record_series['Contracted Amount'])
-        except:
-            contracted_amount = None
-    
-    # Calculate derived values
-    remaining_to_invoice = contracted_amount - total_invoice if contracted_amount is not None and total_invoice is not None else None
-    er_contract = contracted_amount / total_cost if total_cost > 0 and contracted_amount is not None else None
-    er_invoiced = total_invoice / total_cost if total_cost > 0 and total_invoice is not None and total_invoice > 0 else None
-    
-    # Calculate ER DECON LLC Contracted and Invoiced
-    # Standardize selected_jobcode before passing to functions
-    standardized_selected_jobcode = standardize_project_no(str(selected_jobcode))
-    er_decon_llc_contracted = calculate_er_decon_llc_contracted(global_projects_df, standardized_selected_jobcode, global_merged_df)
-    er_decon_llc_invoiced = calculate_decon_llc_invoiced(global_projects_df, standardized_selected_jobcode, global_merged_df, global_raw_invoices)
+    # Format values for the right table
+    format_money = lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A"
+    format_er = lambda x: f"{x:.2f}" if pd.notna(x) else "N/A"
 
-    # Format values
-    format_money = lambda x: f"${x:,.2f}" if x is not None else "N/A"
-    format_er = lambda x: f"{x:.2f}" if x is not None else "N/A"
-    
-    # Create right table
+    # Create right table data directly from the summary
     right_table_data = [
-        {"Field": "Contracted Amount", "Value": format_money(contracted_amount), "Value_num": contracted_amount or 0},
-        {"Field": "Total Invoice", "Value": format_money(total_invoice), "Value_num": total_invoice or 0},
-        {"Field": "Total Cost", "Value": format_money(total_cost), "Value_num": total_cost or 0},
-        {"Field": "Remaining to Invoice", "Value": format_money(remaining_to_invoice), "Value_num": remaining_to_invoice or 0},
-        {"Field": "ER Contract", "Value": format_er(er_contract), "Value_num": er_contract or 0},
-        {"Field": "ER Invoiced", "Value": format_er(er_invoiced), "Value_num": er_invoiced or 0},
-        {"Field": "ER DECON LLC Contracted", "Value": format_er(er_decon_llc_contracted), "Value_num": er_decon_llc_contracted or 0},
-        {"Field": "ER DECON LLC Invoiced", "Value": format_er(er_decon_llc_invoiced), "Value_num": er_decon_llc_invoiced or 0}
+        {"Field": "Contracted Amount", "Value": format_money(project_series['contracted_amount']), "Value_num": project_series.get('contracted_amount', 0)},
+        {"Field": "Total Invoice", "Value": format_money(project_series['total_invoiced']), "Value_num": project_series.get('total_invoiced', 0)},
+        {"Field": "Total Cost", "Value": format_money(project_series['total_cost']), "Value_num": project_series.get('total_cost', 0)},
+        {"Field": "Remaining to Invoice", "Value": format_money(project_series['remaining_to_invoice']), "Value_num": project_series.get('remaining_to_invoice', 0)},
+        {"Field": "ER Contract", "Value": format_er(project_series['er_contract']), "Value_num": project_series.get('er_contract', 0)},
+        {"Field": "ER Invoiced", "Value": format_er(project_series['er_invoiced']), "Value_num": project_series.get('er_invoiced', 0)},
+        {"Field": "ER DECON LLC Invoiced", "Value": format_er(project_series['er_decon_llc_invoiced']), "Value_num": project_series.get('er_decon_llc_invoiced', 0)}
     ]
     
     # Define columns
@@ -2039,7 +1702,7 @@ def update_project_tables(selected_jobcode):
     right_columns = [
         {"name": "Field", "id": "Field"},
         {"name": "Value", "id": "Value"},
-        {"name": "Value_num", "id": "Value_num", "type": "numeric"}#, "hidden": True}
+        {"name": "Value_num", "id": "Value_num", "type": "numeric"}
     ]
     
     return left_data, left_columns, right_table_data, right_columns
@@ -2067,8 +1730,7 @@ def update_project_description(selected_jobcode):
         return html.Div([html.B("Project Description:"), " " + str(description)])
     return "No Project Description Found."
 #################################################################################################################
-# Correcting the project log path
-project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
+# Correcting the project log path - REMOVED
 @app.callback(
     Output("download-weekly-report-pdf", "data"),
     Input("export-weekly-report", "n_clicks"),
@@ -2512,14 +2174,11 @@ def generate_monthly_report(selected_date):
         return [], [], [], [], [], []
     
     # Call the function from data_processing
-    project_log_path = r"\\192.168.39.20\Confidential\12 Invoicing\Contracted Projects\00_Project Log\2025 Projects Log.xlsx"
-    
     report_data, all_columns = data_processing.generate_monthly_report_data(
         selected_date, 
         global_projects_df, 
         global_merged_df, 
-        global_raw_invoices,
-        project_log_path
+        global_raw_invoices
     )
     if not report_data:
         return [], [], [], [], [], []
@@ -2695,8 +2354,7 @@ def generate_monthly_report(selected_date):
                 'Type': type_name,
                 'Projected': f"${projected:,.2f}" if projected > 0 else "$0.00",
                 'Actual': f"${actual:,.2f}" if actual > 0 else "$0.00",
-                'Percentage Projected vs Actual': f"{percent:.0f}%",
-                'percentage_numeric': percent
+                'Percentage Projected vs Actual': f"{percent:.0f}%"
             })
         
         # Sort by type
@@ -2711,18 +2369,17 @@ def generate_monthly_report(selected_date):
             'Type': 'TOTAL',
             'Projected': f"${total_projected:,.2f}" if total_projected > 0 else "$0.00",
             'Actual': f"${total_actual:,.2f}" if total_actual > 0 else "$0.00",
-            'Percentage Projected vs Actual': f"{total_percent:.0f}%",
-            'percentage_numeric': total_percent
+            'Percentage Projected vs Actual': f"{total_percent:.0f}%"
         })
     
     # If no data, add empty row with totals
     if not forecast_type_data:
         forecast_type_data = [
-            {'Type': '0-Pay App (LS)', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%', 'percentage_numeric': 0},
-            {'Type': '1-Pay App (TM)', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%', 'percentage_numeric': 0},
-            {'Type': '2-Organic', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%', 'percentage_numeric': 0},
-            {'Type': '3-Large', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%', 'percentage_numeric': 0},
-            {'Type': 'TOTAL', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%', 'percentage_numeric': 0}
+            {'Type': '0-Pay App (LS)', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'},
+            {'Type': '1-Pay App (TM)', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'},
+            {'Type': '2-Organic', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'},
+            {'Type': '3-Large', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'},
+            {'Type': 'TOTAL', 'Projected': '$0.00', 'Actual': '$0.00', 'Percentage Projected vs Actual': '0%'}
         ]
     
     forecast_type_columns = [
@@ -2941,7 +2598,7 @@ if __name__ == "__main__":
     # Add this somewhere before the server starts
     print("First few rows of merged data:")
     print(global_merged_df[['Project No', 'jobcode_2', 'hours', 'Employee', 'Personel']].head(5))#app.run(debug=True, host='localhost', port=7050, use_reloader=False)  
-    app.run(debug=True, host='0.0.0.0', port=7050, use_reloader=False)
+    app.run(debug=True, host='10.1.2.130', port=8050, use_reloader=False)
 
 # Callback for Time Distribution By Employee Pie Chart
 # Callback for Time Distribution By Employee Pie Chart
